@@ -6,7 +6,7 @@ This repository owns the custom FFmpeg sources, pins, profiles, codec recipes, p
 
 - `sources.lock.json` — upstream URLs, versions, and SHA-256 pins.
 - `profiles/` — the authoritative component and platform configuration for `play-sdk` and `tools`.
-- `build.py` — fetch, build, audit, package, and qualify controller.
+- `build.py` — fetch, build, and audit controller; packaging and qualification follow in S5.
 - `docs/` — baseline evidence and profile/artifact documentation.
 - `.work/` — disposable downloads, builds, stages, and scratch (ignored locally).
 

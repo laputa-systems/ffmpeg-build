@@ -1,0 +1,97 @@
+import json
+import pathlib
+import sys
+import tempfile
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import build  # noqa: E402
+
+
+class ProfileTests(unittest.TestCase):
+    def test_profiles_declare_target_scope(self):
+        for name in ("play-sdk", "tools"):
+            profile, _ = build.load_profile(name)
+            self.assertTrue(profile["targets"])
+
+    def test_play_sdk_macos_components(self):
+        profile, _ = build.load_profile("play-sdk")
+        requested = build.requested_components(profile, "aarch64-apple-darwin")
+        self.assertEqual(requested["protocols"], ["file"])
+        self.assertIn("libdav1d", requested["decoders"])
+        self.assertIn("h264_videotoolbox", requested["hwaccels"])
+        self.assertIn("hevc_videotoolbox", requested["hwaccels"])
+        self.assertNotIn("encoders", requested)
+        self.assertNotIn("muxers", requested)
+
+    def test_source_pins_have_sha256(self):
+        lock = build.load_sources()
+        for source in lock["sources"].values():
+            self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_mov_text_configure_alias(self):
+        self.assertEqual(build.configure_component("decoders", "mov_text"), "movtext")
+
+    def test_component_problems(self):
+        requested = {"decoders": ["h264"], "protocols": ["file"]}
+        resolved = {
+            "decoders": ["h263", "h264"],
+            "protocols": ["file", "http"],
+            "encoders": ["aac"],
+        }
+        problems = build.component_problems(requested, resolved)
+        self.assertTrue(any("encoders" in problem for problem in problems))
+        self.assertTrue(any("network protocols" in problem for problem in problems))
+
+    def test_auto_selected(self):
+        requested = {"decoders": ["h264"]}
+        resolved = {"decoders": ["h263", "h264"]}
+        self.assertEqual(build.auto_selected(requested, resolved), {"decoders": ["h263"]})
+
+
+class StageTests(unittest.TestCase):
+    def setUp(self):
+        build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=build.TMP_ROOT)
+        self.stage = pathlib.Path(self.temp.name) / "stage"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_normalize_pc_removes_build_prefix(self):
+        pc_dir = self.stage / "lib" / "pkgconfig"
+        pc_dir.mkdir(parents=True)
+        pc = pc_dir / "libavcodec.pc"
+        pc.write_text(
+            "prefix=/build/prefix\n"
+            "exec_prefix=${prefix}\n"
+            "libdir=${exec_prefix}/lib\n"
+            "includedir=${prefix}/include\n"
+            "\n"
+            "Name: libavcodec\n"
+            "Version: 1\n"
+            "Libs: -L${libdir} -lavcodec\n"
+            "Cflags: -I${includedir}\n"
+        )
+        build.normalize_pc(self.stage)
+        text = pc.read_text()
+        self.assertIn("prefix=${pcfiledir}/../..", text)
+        self.assertNotIn("/build/prefix", text)
+        self.assertIn("libdir=${prefix}/lib", text)
+
+    def test_prune_stage_keeps_manifest(self):
+        (self.stage / "share" / "man").mkdir(parents=True)
+        (self.stage / "share" / "ffmpeg" / "examples").mkdir(parents=True)
+        manifest = self.stage / "share" / "ffmpeg-build" / "manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({"contract": 1}))
+        build.prune_stage(self.stage)
+        self.assertFalse((self.stage / "share" / "man").exists())
+        self.assertFalse((self.stage / "share" / "ffmpeg").exists())
+        self.assertTrue(manifest.is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
