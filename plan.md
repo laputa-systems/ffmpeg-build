@@ -4,13 +4,13 @@
 
 **Goal.** Make `laputa-systems/ffmpeg-build` the one authoritative home for the custom FFmpeg sources, pins, profile configuration, codec recipes, packaging, audits, and releases. Player consumes a pinned `play-sdk`; `usr` installs the released `ffmpeg`/`ffprobe` pair.
 
-**Accepted.** S0, S1.
+**Accepted.** S0, S1, S2, S3, S4, S5.
 
 **Red or parked.** None.
 
-**Next.** S2: add the Linux `play-sdk` targets and the container build path.
+**Next.** S6: push and publish the first producer release; S9 runs in parallel in `usr`.
 
-**Resume.** Read this file and execute from S2. Stop only on a hard stop in the charter. First command: `git -C /Users/josh/d/ffmpeg-build status --short`.
+**Resume.** Read this file and execute from the first item not accepted. Stop only on a hard stop in the charter. First command: `git -C /Users/josh/d/ffmpeg-build status --short`.
 
 ## Charter
 

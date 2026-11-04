@@ -1,0 +1,328 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag (YYYYMMDD or YYYYMMDD-rN); empty uses the UTC date
+        required: false
+        default: ''
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+env:
+  XCODE_APP: /Applications/Xcode_27.1.app
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      upstream: ${{ steps.upstream.outputs.upstream }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+        run: python3 .github/scripts/resolve_release.py
+
+      - name: Read upstream version
+        id: upstream
+        run: |
+          upstream=$(python3 -c 'import json; print(json.load(open("sources.lock.json"))["sources"]["ffmpeg"]["version"])')
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests
+
+  fixtures:
+    name: Fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Generate fixtures with Alpine FFmpeg 9.0.2
+        run: scripts/linux-fixtures.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixtures
+          path: .work/fixtures
+          if-no-files-found: error
+
+  build-macos:
+    name: Build aarch64-apple-darwin
+    needs: [prepare, fixtures]
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      TARGET: aarch64-apple-darwin
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+
+      - name: Install build tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install meson ninja pkgconf
+
+      - name: Cache sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .work/cache/sources
+          key: ffmpeg-sources-${{ env.TARGET }}-xcode-27.1-${{ hashFiles('sources.lock.json', 'profiles/*.json', 'build.py', 'scripts/*.sh', 'docker/Dockerfile') }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fixtures
+          path: .work/fixtures
+
+      - name: Build, audit, and package
+        run: |
+          for profile in play-sdk tools; do
+            python3 build.py build --target "$TARGET" --profile "$profile"
+            python3 build.py audit --target "$TARGET" --profile "$profile"
+            python3 build.py package --target "$TARGET" --profile "$profile" --tag "$TAG"
+          done
+          tests/tools-workflows.sh ".work/stage/$TARGET/tools"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archives-aarch64-apple-darwin
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-linux:
+    name: Build ${{ matrix.target }}
+    needs: [prepare, fixtures]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    env:
+      TARGET: ${{ matrix.target }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .work/cache/sources
+          key: ffmpeg-sources-${{ matrix.target }}-${{ hashFiles('sources.lock.json', 'profiles/*.json', 'build.py', 'scripts/*.sh', 'docker/Dockerfile') }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fixtures
+          path: .work/fixtures
+
+      - name: Build, audit, and package
+        run: |
+          for profile in play-sdk tools; do
+            scripts/linux-build.sh "$TARGET" "$profile"
+            python3 build.py package --target "$TARGET" --profile "$profile" --tag "$TAG"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archives-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  assemble:
+    name: Assemble
+    needs: [prepare, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: archives-*
+          path: .work/artifacts
+
+      - name: Assemble release assets
+        run: |
+          python3 .github/scripts/assemble_release.py .work/artifacts release \
+            "${{ needs.prepare.outputs.upstream }}" "${{ needs.prepare.outputs.tag }}" "$GITHUB_SHA"
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: release
+          if-no-files-found: error
+
+  qualify-macos:
+    name: Qualify aarch64-apple-darwin
+    needs: [prepare, assemble]
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      - name: Install pkg-config
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install pkgconf
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fixtures
+          path: .work/fixtures
+
+      - name: Qualify published bytes
+        run: |
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+          for archive in dist/*-aarch64-apple-darwin-*.tar.gz; do
+            python3 build.py qualify --archive "$archive"
+          done
+
+  qualify-linux:
+    name: Qualify ${{ matrix.target }}
+    needs: [prepare, assemble]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fixtures
+          path: .work/fixtures
+
+      - name: Qualify published bytes
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          for archive in dist/*-${{ matrix.target }}-*.tar.gz; do
+            scripts/linux-qualify.sh "$archive"
+          done
+
+  publish:
+    name: Publish
+    needs: [prepare, qualify-macos, qualify-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+
+      - name: Check release bytes
+        run: |
+          (cd release && sha256sum -c SHA256SUMS)
+          test "$(python3 -c 'import json; print(json.load(open("release/release.json"))["commit"])')" = "$GITHUB_SHA"
+          test "$(find release -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 6
+
+      - name: Refuse to overwrite an existing release
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; rerun with a new YYYYMMDD-rN tag" >&2
+            exit 1
+          fi
+
+      - name: Publish
+        run: |
+          upstream=$(python3 -c 'import json; print(json.load(open("release/release.json"))["upstream"])')
+          cat > notes.md <<EOF
+          FFmpeg ${upstream} built from pinned sources at ${GITHUB_SHA}.
+
+          - \`play-sdk\`: static playback SDK (headers, static libraries, relocatable pkg-config) for Player.
+          - \`tools\`: static, headless \`ffmpeg\` and \`ffprobe\` for local postprocessing. No network protocols or devices.
+
+          Targets: aarch64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl.
+          Verify every archive against SHA256SUMS before use. release.json records the tag, commit, and asset digests.
+          EOF
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TAG" --notes-file notes.md release/*
+
+      - name: Verify published assets
+        run: |
+          mkdir -p published
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --dir published
+          (cd published && sha256sum -c SHA256SUMS)
+          cmp release/SHA256SUMS published/SHA256SUMS
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false
