@@ -4,13 +4,13 @@
 
 **Goal.** Make `laputa-systems/ffmpeg-build` the one authoritative home for the custom FFmpeg sources, pins, profile configuration, codec recipes, packaging, audits, and releases. Player consumes a pinned `play-sdk`; `usr` installs the released `ffmpeg`/`ffprobe` pair.
 
-**Accepted.** S0, S1, S2, S3, S4, S5, S6 (release `20261104`), S9.
+**Accepted.** S0–S12. Producer release `20261104`; Player `v0.42.1`; `usr` ffmpeg pair (local commits, push awaits the owner).
 
-**Red or parked.** None from this campaign. Pre-existing in `usr`: `dotfiles/dl-test.sh` cases 1, 5, 6, 9-13 (cmd/dsh/node) fail at `864a2e5` too, and `shellcheck -s sh` already reports 14 findings there.
+**Red or parked.** None. The pre-existing `usr` `dl-test.sh` and shellcheck failures were fixed in `8da0a61` and `acaa003`.
 
 **Owner ruling (2026-11-04).** x86-64 Linux stays in the release matrix and in Player's Linux CI, but is verified only on GitHub's native runners: no local x86-64 builds or container runs until the owner is on a Linux host. The local x86-64 steps in S7, S8, and S10 (the `linux-container.sh` fetch/build/audit and the Linux suite) are replaced by the corresponding CI jobs.
 
-**Next.** S7: pin Player to `20261104`; then S8, S10, S11, S12.
+**Next.** None. Owner: push `usr`; run the Needs-environment checks below.
 
 **Resume.** Read this file and execute from the first item not accepted. Stop only on a hard stop in the charter. First command: `git -C /Users/josh/d/ffmpeg-build status --short`.
 
