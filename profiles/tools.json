@@ -1,13 +1,93 @@
 {
   "contract": 1,
   "profile": "tools",
+  "artifact": "tools",
   "description": "Headless ffmpeg and ffprobe pair for local postprocessing. No playback SDK, devices, network, or ffplay.",
   "sources": [
     "ffmpeg",
     "dav1d",
     "zlib"
   ],
-  "components": {},
+  "components": {
+    "demuxers": [
+      "mov",
+      "matroska",
+      "mpegts",
+      "mp3",
+      "ogg",
+      "avi",
+      "asf",
+      "flv",
+      "mpegps",
+      "mpegvideo",
+      "rm",
+      "image2",
+      "webvtt",
+      "srt",
+      "ffmetadata"
+    ],
+    "decoders": [
+      "h264",
+      "hevc",
+      "vp8",
+      "vp9",
+      "libdav1d",
+      "mpeg4",
+      "h263",
+      "mpeg2video",
+      "wmv2",
+      "flv",
+      "theora",
+      "rv20",
+      "aac",
+      "mp3float",
+      "opus",
+      "vorbis",
+      "ac3",
+      "mp2float",
+      "wmav2",
+      "png",
+      "mjpeg",
+      "webp"
+    ],
+    "subtitle_decoders": [
+      "subrip",
+      "ass",
+      "webvtt",
+      "mov_text"
+    ],
+    "encoders": [
+      "png",
+      "subrip",
+      "mov_text"
+    ],
+    "muxers": [
+      "mp4",
+      "ipod",
+      "mov",
+      "webm",
+      "mp3",
+      "srt",
+      "image2"
+    ],
+    "parsers": [
+      "h264",
+      "aac"
+    ],
+    "bsfs": [
+      "aac_adtstoasc",
+      "setts"
+    ],
+    "filters": [
+      "scale",
+      "aresample"
+    ],
+    "protocols": [
+      "file",
+      "pipe",
+      "fd"
+    ]
+  },
   "targets": {
     "aarch64-apple-darwin": {
       "platform": "macos",
@@ -18,7 +98,12 @@
         "--enable-videotoolbox",
         "--enable-audiotoolbox"
       ],
-      "components": {},
+      "components": {
+        "encoders": [
+          "hevc_videotoolbox",
+          "aac_at"
+        ]
+      },
       "frameworks": [
         "VideoToolbox",
         "AudioToolbox",
@@ -27,6 +112,39 @@
         "CoreVideo",
         "CoreServices"
       ],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
+      ],
+      "system_libraries": []
+    },
+    "x86_64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "x86_64",
+      "cpu_baseline": "x86-64",
+      "configure_flags": [],
+      "components": {},
+      "frameworks": [],
+      "system_libraries": [],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
+      ]
+    },
+    "aarch64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "aarch64",
+      "cpu_baseline": "armv8-a",
+      "configure_flags": [],
+      "components": {},
+      "frameworks": [],
+      "system_libraries": [],
       "external_libraries": [
         "dav1d"
       ],

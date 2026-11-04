@@ -102,10 +102,29 @@ class StageTests(unittest.TestCase):
         manifest = self.stage / "share" / "ffmpeg-build" / "manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({"contract": 1}))
-        build.prune_stage(self.stage)
+        build.prune_stage(self.stage, "sdk")
         self.assertFalse((self.stage / "share" / "man").exists())
         self.assertFalse((self.stage / "share" / "ffmpeg").exists())
         self.assertTrue(manifest.is_file())
+
+    def test_prune_tools_stage_keeps_only_programs(self):
+        for relative in ("bin/ffmpeg", "bin/ffprobe", "lib/libavcodec.a", "include/libavutil/avutil.h"):
+            path = self.stage / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("")
+        build.prune_stage(self.stage, "tools")
+        self.assertTrue((self.stage / "bin" / "ffmpeg").is_file())
+        self.assertTrue((self.stage / "bin" / "ffprobe").is_file())
+        self.assertFalse((self.stage / "lib").exists())
+        self.assertFalse((self.stage / "include").exists())
+
+    def test_build_prefix_leaks(self):
+        clean = self.stage / "lib" / "clean.a"
+        dirty = self.stage / "lib" / "dirty.a"
+        clean.parent.mkdir(parents=True)
+        clean.write_bytes(b"./libavutil/log.c")
+        dirty.write_bytes(str(build.ROOT).encode() + b"/.work/build/x.c")
+        self.assertEqual(build.build_prefix_leaks(self.stage), ["lib/dirty.a"])
 
 
 if __name__ == "__main__":

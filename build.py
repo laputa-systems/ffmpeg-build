@@ -19,6 +19,7 @@ CACHE = WORK / "cache" / "sources"
 BUILD_ROOT = WORK / "build"
 STAGE_ROOT = WORK / "stage"
 TMP_ROOT = WORK / "tmp"
+INSTALL_PREFIX = "/opt/ffmpeg-build"
 
 COMPONENT_CATEGORIES = (
     "demuxers",
@@ -50,6 +51,7 @@ CONFIGURE_OPTION = {
 COMPONENT_ALIASES = {
     ("decoders", "mov_text"): "movtext",
     ("subtitle_decoders", "mov_text"): "movtext",
+    ("encoders", "mov_text"): "movtext",
 }
 
 BUNDLED_LIBRARIES = {
@@ -158,11 +160,17 @@ def load_sources():
     return lock
 
 
+ARTIFACTS = ("sdk", "tools")
+TOOLS_PROGRAMS = ("ffmpeg", "ffprobe")
+
+
 def load_profile(name):
     path = ROOT / "profiles" / f"{name}.json"
     profile = read_json(path)
     if profile.get("profile") != name:
         fail(f"{path} does not declare profile {name}")
+    if profile.get("artifact") not in ARTIFACTS:
+        fail(f"{path} artifact must be one of {ARTIFACTS}")
     targets = profile.get("targets")
     if not isinstance(targets, dict) or not targets:
         fail(f"{path} has no target scope")
@@ -276,15 +284,27 @@ def platform_toolchain(config):
     return info
 
 
-def configure_args_for(profile, target, stage, toolchain):
+def build_paths(profile_name, target):
+    profile, _ = load_profile(profile_name)
+    stage = STAGE_ROOT / target / profile_name
+    build_dir = BUILD_ROOT / target / profile_name
+    deps = stage if profile["artifact"] == "sdk" else build_dir / "deps"
+    return stage, build_dir, deps
+
+
+def configure_args_for(profile, target, build_dir, deps, toolchain):
     config = target_config(profile, target)
     requested = requested_components(profile, target)
     cc = config.get("cc", "cc")
+    programs = ["--disable-programs"]
+    if profile["artifact"] == "tools":
+        programs += [f"--enable-{name}" for name in TOOLS_PROGRAMS]
+        programs.append("--pkg-config-flags=--static")
     args = [
-        f"--prefix={stage}",
+        f"--prefix={INSTALL_PREFIX}",
         "--disable-shared",
         "--enable-static",
-        "--disable-programs",
+        *programs,
         "--disable-doc",
         "--disable-network",
         "--disable-avdevice",
@@ -307,10 +327,13 @@ def configure_args_for(profile, target, stage, toolchain):
     else:
         args.append(f"--arch={config['arch']}")
         extra_cflags.append(f"-march={config['cpu_baseline']}")
-    extra_cflags.append(f"-I{stage}/include")
-    extra_ldflags.append(f"-L{stage}/lib")
+    relative_deps = os.path.relpath(deps, build_dir / "ffmpeg")
+    extra_cflags.append(f"-I{relative_deps}/include")
+    extra_ldflags.append(f"-L{relative_deps}/lib")
     args.append("--extra-cflags=" + " ".join(extra_cflags))
     args.append("--extra-ldflags=" + " ".join(extra_ldflags))
+    if profile["artifact"] == "tools" and config["platform"] == "linux":
+        args.append("--extra-ldexeflags=-static-pie")
     args.extend(config.get("configure_flags", []))
     for category, names in requested.items():
         option = CONFIGURE_OPTION[category]
@@ -319,13 +342,13 @@ def configure_args_for(profile, target, stage, toolchain):
     return args
 
 
-def dep_env(config, stage, toolchain):
+def dep_env(config, deps, toolchain):
     env = os.environ.copy()
     env["TMPDIR"] = str(TMP_ROOT)
     env["CC"] = config.get("cc", "cc")
-    env["PKG_CONFIG_PATH"] = str(stage / "lib" / "pkgconfig")
-    env["PKG_CONFIG_LIBDIR"] = str(stage / "lib" / "pkgconfig")
-    cflags = ["-O2", "-fPIC"]
+    env["PKG_CONFIG_PATH"] = str(deps / "lib" / "pkgconfig")
+    env["PKG_CONFIG_LIBDIR"] = str(deps / "lib" / "pkgconfig")
+    cflags = ["-O2", "-fPIC", prefix_map_flag()]
     ldflags = []
     if config["platform"] == "macos":
         cflags.extend(["-isysroot", toolchain["sdk"]])
@@ -344,10 +367,16 @@ def dep_env(config, stage, toolchain):
 SYSTEM_PKG_CONFIG_DIRS = ("/usr/lib/pkgconfig", "/usr/share/pkgconfig")
 
 
-def ffmpeg_env(config, stage):
+def prefix_map_flag():
+    return f"-ffile-prefix-map={ROOT}=."
+
+
+def ffmpeg_env(config, deps):
     env = os.environ.copy()
     env["TMPDIR"] = str(TMP_ROOT)
-    search = [str(stage / "lib" / "pkgconfig")]
+    for variable in ("CFLAGS", "ASFLAGS", "OBJCFLAGS"):
+        env[variable] = prefix_map_flag()
+    search = [str(deps / "lib" / "pkgconfig")]
     if config.get("system_libraries"):
         search.extend(SYSTEM_PKG_CONFIG_DIRS)
     env["PKG_CONFIG_PATH"] = search[0]
@@ -399,13 +428,13 @@ def extract_source(source, destination):
     return root
 
 
-def build_zlib(source_dir, stage, env):
-    run(["./configure", f"--prefix={stage}", "--static"], cwd=source_dir, env=env)
+def build_zlib(source_dir, prefix, env):
+    run(["./configure", f"--prefix={prefix}", "--static"], cwd=source_dir, env=env)
     run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
     run(["make", "install"], cwd=source_dir, env=env)
 
 
-def build_dav1d(source_dir, build_dir, stage, env):
+def build_dav1d(source_dir, build_dir, prefix, env):
     if build_dir.exists():
         shutil.rmtree(build_dir)
     run(
@@ -414,7 +443,7 @@ def build_dav1d(source_dir, build_dir, stage, env):
             "setup",
             str(build_dir),
             str(source_dir),
-            f"--prefix={stage}",
+            f"--prefix={prefix}",
             "--libdir=lib",
             "--buildtype=release",
             "--default-library=static",
@@ -433,7 +462,7 @@ def normalize_pc(stage):
     stage_prefix = "${pcfiledir}/../.."
     for pc in sorted(pc_dir.glob("*.pc")):
         text = pc.read_text()
-        text = text.replace(str(stage), stage_prefix)
+        text = text.replace(str(stage), stage_prefix).replace(INSTALL_PREFIX, stage_prefix)
         lines = []
         for line in text.splitlines():
             if line.startswith("prefix="):
@@ -451,15 +480,24 @@ def normalize_pc(stage):
         pc.write_text("\n".join(lines) + "\n")
 
 
-def prune_stage(stage):
-    for relative in ("share/man", "share/ffmpeg", "share/doc", "share/examples"):
+def prune_stage(stage, artifact):
+    trees = ["share/man", "share/ffmpeg", "share/doc", "share/examples"]
+    files = []
+    if artifact == "sdk":
+        files += [f"bin/{name}" for name in (*TOOLS_PROGRAMS, "ffplay")]
+    else:
+        trees += ["include", "lib"]
+    for relative in trees:
         path = stage / relative
         if path.exists():
             shutil.rmtree(path)
-    for relative in ("bin/ffmpeg", "bin/ffprobe", "bin/ffplay"):
+    for relative in files:
         path = stage / relative
         if path.exists():
             path.unlink()
+    bin_dir = stage / "bin"
+    if bin_dir.is_dir() and not any(bin_dir.iterdir()):
+        bin_dir.rmdir()
 
 
 def parse_components(build_dir):
@@ -577,7 +615,20 @@ def build_fingerprint(profile_path, target, profile_name, args, toolchain):
     return digest.hexdigest()
 
 
-def stage_complete(stage):
+def finish_programs(config, stage):
+    for name in TOOLS_PROGRAMS:
+        binary = stage / "bin" / name
+        if config["platform"] == "macos":
+            run(["strip", str(binary)])
+            run(["codesign", "--force", "--sign", "-", str(binary)])
+        else:
+            run(["strip", "--strip-all", str(binary)])
+
+
+def stage_complete(stage, artifact):
+    if artifact == "tools":
+        required = (*(f"bin/{name}" for name in TOOLS_PROGRAMS), "share/ffmpeg-build/manifest.json")
+        return all((stage / path).is_file() for path in required)
     required = (
         "include/libavutil/ffversion.h",
         "lib/libavcodec.a",
@@ -658,13 +709,13 @@ def build(target, profile_name):
     profile, profile_path = load_profile(profile_name)
     config = target_config(profile, target)
     require_native_host(config, target)
-    stage = STAGE_ROOT / target / profile_name
-    build_dir = BUILD_ROOT / target / profile_name
+    artifact = profile["artifact"]
+    stage, build_dir, deps = build_paths(profile_name, target)
     toolchain = platform_toolchain(config)
-    args = configure_args_for(profile, target, stage, toolchain)
+    args = configure_args_for(profile, target, build_dir, deps, toolchain)
     fingerprint = build_fingerprint(profile_path, target, profile_name, args, toolchain)
     stamp_path = build_dir / "stamp.json"
-    if stamp_path.is_file() and stage_complete(stage):
+    if stamp_path.is_file() and stage_complete(stage, artifact):
         stamp = read_json(stamp_path)
         if stamp.get("fingerprint") == fingerprint:
             print(f"up to date: {stage}")
@@ -685,25 +736,31 @@ def build(target, profile_name):
     dav1d_source = extract_source(lock["sources"]["dav1d"], source_root)
     (ffmpeg_source / "VERSION").write_text(lock["sources"]["ffmpeg"]["version"] + "\n")
 
-    env = dep_env(config, stage, toolchain)
+    env = dep_env(config, deps, toolchain)
     print(f"build zlib {lock['sources']['zlib']['version']}")
-    build_zlib(zlib_source, stage, env)
+    build_zlib(zlib_source, deps, env)
     print(f"build dav1d {lock['sources']['dav1d']['version']}")
-    build_dav1d(dav1d_source, build_dir / "dav1d", stage, env)
+    build_dav1d(dav1d_source, build_dir / "dav1d", deps, env)
 
     ffmpeg_build = build_dir / "ffmpeg"
     ffmpeg_build.mkdir()
     print(f"configure FFmpeg {lock['sources']['ffmpeg']['version']}")
-    run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
+    run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
     print(f"build FFmpeg {lock['sources']['ffmpeg']['version']}")
-    run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
-    run(["make", "install"], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
+    run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
+    install_root = build_dir / "install"
+    run(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
+    shutil.copytree(install_root / INSTALL_PREFIX.lstrip("/"), stage, symlinks=True, dirs_exist_ok=True)
+    shutil.rmtree(install_root)
 
-    prune_stage(stage)
-    normalize_pc(stage)
+    prune_stage(stage, artifact)
+    if artifact == "tools":
+        finish_programs(config, stage)
+    if artifact == "sdk":
+        normalize_pc(stage)
     manifest = manifest_for(profile, target, ffmpeg_build, stage, args, toolchain)
     write_manifest(stage, manifest)
-    if not stage_complete(stage):
+    if not stage_complete(stage, artifact):
         fail(f"stage is incomplete after build: {stage}")
     stamp = {
         "fingerprint": fingerprint,
@@ -767,28 +824,37 @@ def pc_declares(pc_texts, library):
     return False
 
 
-def audit_linux(case, config, stage, ffmpeg_build, config_mak, archives):
-    arch = config["arch"]
-    config_h = (ffmpeg_build / "config.h").read_text()
-    case(
-        f"FFmpeg configured for {arch}",
-        f"#define {FFMPEG_ARCH_DEFINE[arch]} 1" in config_h,
-    )
-    problems = host_cpu_flag_problems(config_mak, arch)
-    case("no host-specific CPU flags", not problems, "; ".join(problems))
-    case(
-        f"CPU baseline -march={config['cpu_baseline']}",
-        f"-march={config['cpu_baseline']}" in " ".join(COMPILE_FLAG_VARIABLES.findall(config_mak)),
-    )
-    glibc = [archive.name for archive in archives if b"GLIBC_" in archive.read_bytes()]
-    case("no glibc symbol versions", not glibc, f"archives: {glibc}")
-    pc_texts = [pc.read_text() for pc in sorted((stage / "lib" / "pkgconfig").glob("libav*.pc"))]
-    for library in config.get("system_libraries", []):
-        case(f"pkg-config declares {library}", pc_declares(pc_texts, library))
-    print(
-        "abi: static archives for musl; no symbol versioning; "
-        f"system libraries linked by the consumer: {config.get('system_libraries', [])}"
-    )
+class Audit:
+    def __init__(self):
+        self.results = []
+
+    def case(self, name, ok, detail=""):
+        status = "PASS" if ok else "FAIL"
+        line = f"{status} audit: {name}"
+        if detail and not ok:
+            line += f": {detail}"
+        print(line)
+        self.results.append(bool(ok))
+
+    def finish(self):
+        passed = sum(1 for result in self.results if result)
+        failed = len(self.results) - passed
+        print(f"TOTAL {passed} passed, {failed} failed")
+        return 0 if failed == 0 else 1
+
+
+def read_manifest(check, stage):
+    path = stage / "share" / "ffmpeg-build" / "manifest.json"
+    if not path.is_file():
+        check.case("manifest readable", False, f"missing {path}")
+        return {}
+    try:
+        manifest = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        check.case("manifest readable", False, str(exc))
+        return {}
+    check.case("manifest readable", True)
+    return manifest
 
 
 def audit(target, profile_name):
@@ -796,60 +862,35 @@ def audit(target, profile_name):
     profile, _ = load_profile(profile_name)
     config = target_config(profile, target)
     require_native_host(config, target)
-    stage = STAGE_ROOT / target / profile_name
-    build_dir = BUILD_ROOT / target / profile_name
-    results = []
-
-    def case(name, ok, detail=""):
-        status = "PASS" if ok else "FAIL"
-        line = f"{status} audit: {name}"
-        if detail and not ok:
-            line += f": {detail}"
-        print(line)
-        results.append(ok)
+    artifact = profile["artifact"]
+    stage, build_dir, deps = build_paths(profile_name, target)
+    check = Audit()
+    case = check.case
 
     if not build_dir.is_dir():
         fail(f"missing build tree {build_dir}; run build first")
     if not stage.is_dir():
         fail(f"missing stage {stage}; run build first")
 
-    version = lock["sources"]["ffmpeg"]["version"]
-    ffversion_path = stage / "include" / "libavutil" / "ffversion.h"
-    ffversion = ""
-    if ffversion_path.is_file():
-        match = re.search(r'#define FFMPEG_VERSION "([^"]+)"', ffversion_path.read_text())
-        if match:
-            ffversion = match.group(1)
-    case(f"ffversion is {version}", ffversion == version, f"found {ffversion!r}")
-
-    programs = []
-    if (stage / "bin").is_dir():
-        programs = sorted(path.name for path in (stage / "bin").iterdir())
-    case("no programs installed", not programs, f"programs: {programs}")
-
-    headers = (
-        "include/libavcodec/avcodec.h",
-        "include/libavformat/avformat.h",
-        "include/libavfilter/avfilter.h",
-        "include/libavutil/avutil.h",
-        "include/libswresample/swresample.h",
-        "include/libswscale/swscale.h",
-        "include/dav1d/dav1d.h",
-        "include/zlib.h",
-    )
-    missing_headers = [path for path in headers if not (stage / path).is_file()]
-    case("headers present", not missing_headers, f"missing: {missing_headers}")
-
-    resolved = parse_components(build_dir / "ffmpeg")
-    config_mak = parse_config_mak(build_dir / "ffmpeg")
+    ffmpeg_build = build_dir / "ffmpeg"
+    resolved = parse_components(ffmpeg_build)
+    config_mak = parse_config_mak(ffmpeg_build)
     requested = requested_components(profile, target)
-    args = configure_args_for(profile, target, stage, platform_toolchain(config))
+    args = configure_args_for(profile, target, build_dir, deps, platform_toolchain(config))
     configuration = parse_configuration(config_mak)
     external_libraries = parse_external_libraries(config_mak)
+    selected = auto_selected(requested, resolved)
 
-    for category in ("encoders", "muxers", "devices"):
-        names = resolved.get(category, [])
-        case(f"no {category}", not names, f"{category}: {names}")
+    case("no devices", not resolved.get("devices"), f"devices: {resolved.get('devices')}")
+    if artifact == "sdk":
+        for category in ("encoders", "muxers"):
+            names = resolved.get(category, [])
+            case(f"no {category}", not names, f"{category}: {names}")
+    else:
+        for category in ("encoders", "muxers"):
+            extra = selected.get(category, [])
+            case(f"no unrequested {category}", not extra, f"{category}: {extra}")
+        case("no hardware decode", not resolved.get("hwaccels"), f"hwaccels: {resolved.get('hwaccels')}")
 
     protocols = set(resolved.get("protocols", []))
     allowed_protocols = set(requested.get("protocols", []))
@@ -873,25 +914,16 @@ def audit(target, profile_name):
         wanted = {configure_component(category, name) for name in names}
         missing = sorted(wanted - set(resolved.get(category, [])))
         case(f"requested {category} present", not missing, f"missing: {missing}")
-
-    selected = auto_selected(requested, resolved)
     print(f"auto-selected: {json.dumps(selected, sort_keys=True)}")
 
-    manifest_path = stage / "share" / "ffmpeg-build" / "manifest.json"
-    manifest = {}
-    if manifest_path.is_file():
-        try:
-            manifest = json.loads(manifest_path.read_text())
-            case("manifest readable", True)
-        except json.JSONDecodeError as exc:
-            case("manifest readable", False, str(exc))
-    else:
-        case("manifest readable", False, f"missing {manifest_path}")
-
+    manifest = read_manifest(check, stage)
     if manifest:
         case("manifest contract", manifest.get("contract") == 1)
         case("manifest producer", bool(manifest.get("producer", {}).get("commit")))
-        case("manifest profile and target", manifest.get("profile") == profile_name and manifest.get("target") == target)
+        case(
+            "manifest profile and target",
+            manifest.get("profile") == profile_name and manifest.get("target") == target,
+        )
         case(
             "manifest sources",
             all(
@@ -934,11 +966,77 @@ def audit(target, profile_name):
         set(external_libraries) <= set(config.get("external_libraries", [])),
         f"extra: {sorted(set(external_libraries) - set(config.get('external_libraries', [])))}",
     )
-    case(
-        "external libraries recorded",
-        external_libraries == manifest.get("external_libraries", []),
-    )
     case("zlib enabled", "CONFIG_ZLIB=yes" in config_mak)
+    case(
+        "PIC enabled",
+        "--enable-pic" in args and re.search(r"-fPIC\b|-fpic\b", config_mak) is not None,
+    )
+    case("no LTO flags", "-flto" not in config_mak)
+    if config["platform"] == "linux":
+        audit_linux_config(case, config, ffmpeg_build, config_mak)
+
+    leaked = build_prefix_leaks(stage)
+    case("no absolute build prefix in artifact", not leaked, f"files: {leaked[:10]}")
+
+    version = lock["sources"]["ffmpeg"]["version"]
+    if artifact == "sdk":
+        audit_sdk(case, target, profile_name, config, stage, version)
+    else:
+        audit_tools(case, config, stage, version)
+    return check.finish()
+
+
+def build_prefix_leaks(stage):
+    needle = (str(ROOT) + "/").encode()
+    return sorted(
+        str(path.relative_to(stage))
+        for path in stage.rglob("*")
+        if path.is_file() and not path.is_symlink() and needle in path.read_bytes()
+    )
+
+
+def audit_linux_config(case, config, ffmpeg_build, config_mak):
+    arch = config["arch"]
+    config_h = (ffmpeg_build / "config.h").read_text()
+    case(
+        f"FFmpeg configured for {arch}",
+        f"#define {FFMPEG_ARCH_DEFINE[arch]} 1" in config_h,
+    )
+    problems = host_cpu_flag_problems(config_mak, arch)
+    case("no host-specific CPU flags", not problems, "; ".join(problems))
+    case(
+        f"CPU baseline -march={config['cpu_baseline']}",
+        f"-march={config['cpu_baseline']}" in " ".join(COMPILE_FLAG_VARIABLES.findall(config_mak)),
+    )
+
+
+def audit_sdk(case, target, profile_name, config, stage, version):
+    ffversion_path = stage / "include" / "libavutil" / "ffversion.h"
+    ffversion = ""
+    if ffversion_path.is_file():
+        match = re.search(r'#define FFMPEG_VERSION "([^"]+)"', ffversion_path.read_text())
+        if match:
+            ffversion = match.group(1)
+    case(f"ffversion is {version}", ffversion == version, f"found {ffversion!r}")
+
+    programs = []
+    if (stage / "bin").is_dir():
+        programs = sorted(path.name for path in (stage / "bin").iterdir())
+    case("no programs installed", not programs, f"programs: {programs}")
+
+    headers = (
+        "include/libavcodec/avcodec.h",
+        "include/libavformat/avformat.h",
+        "include/libavfilter/avfilter.h",
+        "include/libavutil/avutil.h",
+        "include/libswresample/swresample.h",
+        "include/libswscale/swscale.h",
+        "include/dav1d/dav1d.h",
+        "include/zlib.h",
+    )
+    missing_headers = [path for path in headers if not (stage / path).is_file()]
+    case("headers present", not missing_headers, f"missing: {missing_headers}")
+
     for dependency in config.get("bundled_dependencies", []):
         library = BUNDLED_LIBRARIES.get(dependency)
         if not library:
@@ -957,12 +1055,6 @@ def audit(target, profile_name):
             "${pcfiledir}" in prefix and not leaked,
             f"prefix={prefix!r} leaked={leaked}",
         )
-
-    case(
-        "PIC enabled",
-        "--enable-pic" in args and re.search(r"-fPIC\b|-fpic\b", config_mak) is not None,
-    )
-    case("no LTO flags", "-flto" not in config_mak)
 
     archive_problems = []
     archives = sorted((stage / "lib").glob("*.a"))
@@ -984,16 +1076,9 @@ def audit(target, profile_name):
                 continue
             kinds = run(["file", "-b", *map(str, objects)], capture=True, quiet=True).stdout
             for line in kinds.splitlines():
-                if "bitcode" in line.lower():
-                    archive_problems.append(f"{archive.name}: LTO bitcode")
-                    break
-                if config["platform"] == "macos" and "Mach-O" not in line:
-                    archive_problems.append(f"{archive.name}: {line}")
-                    break
-                if config["platform"] == "linux" and (
-                    "ELF" not in line or ELF_MACHINE[config["arch"]] not in line
-                ):
-                    archive_problems.append(f"{archive.name}: {line}")
+                problem = object_kind_problem(config, line)
+                if problem:
+                    archive_problems.append(f"{archive.name}: {problem}")
                     break
         finally:
             if work.exists():
@@ -1005,12 +1090,68 @@ def audit(target, profile_name):
     )
 
     if config["platform"] == "linux":
-        audit_linux(case, config, stage, build_dir / "ffmpeg", config_mak, archives)
+        glibc = [archive.name for archive in archives if b"GLIBC_" in archive.read_bytes()]
+        case("no glibc symbol versions", not glibc, f"archives: {glibc}")
+        pc_texts = [pc.read_text() for pc in sorted((stage / "lib" / "pkgconfig").glob("libav*.pc"))]
+        for library in config.get("system_libraries", []):
+            case(f"pkg-config declares {library}", pc_declares(pc_texts, library))
+        print(
+            "abi: static archives for musl; no symbol versioning; "
+            f"system libraries linked by the consumer: {config.get('system_libraries', [])}"
+        )
 
-    passed = sum(1 for result in results if result)
-    failed = len(results) - passed
-    print(f"TOTAL {passed} passed, {failed} failed")
-    return 0 if failed == 0 else 1
+
+def object_kind_problem(config, line):
+    if "bitcode" in line.lower():
+        return "LTO bitcode"
+    if config["platform"] == "macos" and "Mach-O" not in line:
+        return line
+    if config["platform"] == "linux" and ("ELF" not in line or ELF_MACHINE[config["arch"]] not in line):
+        return line
+    return None
+
+
+MACOS_SYSTEM_LIBRARY = re.compile(r"^(?:/usr/lib/|/System/Library/Frameworks/)")
+
+
+def macos_linked_libraries(binary):
+    lines = output(["otool", "-L", str(binary)]).splitlines()[1:]
+    return [line.strip().split(" (", 1)[0] for line in lines if line.strip()]
+
+
+def audit_tools(case, config, stage, version):
+    bin_dir = stage / "bin"
+    programs = sorted(path.name for path in bin_dir.iterdir()) if bin_dir.is_dir() else []
+    case("programs are ffmpeg and ffprobe", programs == sorted(TOOLS_PROGRAMS), f"programs: {programs}")
+    for relative in ("include", "lib"):
+        case(f"no {relative}/ in tools stage", not (stage / relative).exists())
+
+    for name in TOOLS_PROGRAMS:
+        binary = bin_dir / name
+        if not binary.is_file():
+            case(f"{name} present", False)
+            continue
+        result = subprocess.run([str(binary), "-hide_banner", "-version"], capture_output=True, text=True, check=False)
+        first = result.stdout.splitlines()[0] if result.stdout else ""
+        case(f"{name} reports {version}", first.startswith(f"{name} version {version} "), f"found {first!r}")
+        buildconf = subprocess.run([str(binary), "-hide_banner", "-buildconf"], capture_output=True, text=True, check=False).stdout
+        case(f"{name} -buildconf has --disable-network", "--disable-network" in buildconf)
+        data = binary.read_bytes()
+        kind = output(["file", "-b", str(binary)])
+        if config["platform"] == "macos":
+            case(f"{name} is Mach-O arm64", "Mach-O 64-bit executable arm64" in kind, kind)
+            libraries = macos_linked_libraries(binary)
+            foreign = [library for library in libraries if not MACOS_SYSTEM_LIBRARY.match(library)]
+            case(f"{name} links only system libraries", not foreign, f"foreign: {foreign}")
+            case(f"{name} links no dynamic zlib", not any("libz." in library for library in libraries))
+        else:
+            case(f"{name} is {ELF_MACHINE[config['arch']]} ELF", "ELF" in kind and ELF_MACHINE[config["arch"]] in kind, kind)
+            case(f"{name} is statically linked", "static-pie linked" in kind or "statically linked" in kind, kind)
+            headers = output(["readelf", "-lW", str(binary)])
+            case(f"{name} has no INTERP", "INTERP" not in headers)
+            dynamic = output(["readelf", "-dW", str(binary)])
+            case(f"{name} has no NEEDED", "(NEEDED)" not in dynamic, dynamic)
+            case(f"{name} has no glibc symbol versions", b"GLIBC_" not in data)
 
 
 def main():

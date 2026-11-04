@@ -1,6 +1,7 @@
 {
   "contract": 1,
   "profile": "play-sdk",
+  "artifact": "sdk",
   "description": "Static playback SDK: demuxers, video and image decoders, parsers, filters, and platform hardware decode. No encoders, muxers, devices, or network.",
   "sources": [
     "ffmpeg",
