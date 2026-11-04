@@ -50,6 +50,21 @@ class ProfileTests(unittest.TestCase):
         resolved = {"decoders": ["h263", "h264"]}
         self.assertEqual(build.auto_selected(requested, resolved), {"decoders": ["h263"]})
 
+    def test_host_cpu_flags_only_in_compile_variables(self):
+        config_mak = (
+            "CFLAGS=-O2 -march=armv8-a\n"
+            "NVCCFLAGS=--cuda-gpu-arch=sm_30 -m64\n"
+        )
+        self.assertEqual(build.host_cpu_flag_problems(config_mak, "aarch64"), [])
+        self.assertTrue(build.host_cpu_flag_problems("CFLAGS=-O2 -mavx2\n", "aarch64"))
+        self.assertTrue(build.host_cpu_flag_problems("CFLAGS=-march=native\n", "x86_64"))
+
+    def test_pc_declares_system_library(self):
+        texts = ["Libs.private: -lva-drm -lva -lm\n"]
+        self.assertTrue(build.pc_declares(texts, "libva"))
+        self.assertTrue(build.pc_declares(texts, "libva-drm"))
+        self.assertFalse(build.pc_declares(["Libs.private: -lva-drm\n"], "libva"))
+
 
 class StageTests(unittest.TestCase):
     def setUp(self):

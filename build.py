@@ -226,6 +226,35 @@ def configure_component(category, name):
     return COMPONENT_ALIASES.get((category, name), name)
 
 
+HOST_PLATFORMS = {
+    ("Darwin", "arm64"): ("macos", "aarch64"),
+    ("Linux", "x86_64"): ("linux", "x86_64"),
+    ("Linux", "aarch64"): ("linux", "aarch64"),
+}
+
+
+def require_native_host(config, target):
+    host = HOST_PLATFORMS.get((platform.system(), platform.machine()))
+    wanted = (config["platform"], config["arch"])
+    if host != wanted:
+        fail(
+            f"target {target} builds natively on {wanted[0]} {wanted[1]}; "
+            f"this host is {platform.system()} {platform.machine()}"
+            + ("; use scripts/linux-build.sh" if wanted[0] == "linux" else "")
+        )
+
+
+def musl_version():
+    result = subprocess.run(["ldd", "--version"], capture_output=True, text=True, check=False)
+    text = result.stdout + result.stderr
+    if "musl" not in text:
+        fail("Linux targets require a musl host; ldd does not report musl")
+    match = re.search(r"Version ([0-9][0-9.]*)", text)
+    if not match:
+        fail("cannot read the musl version from ldd")
+    return match.group(1)
+
+
 def platform_toolchain(config):
     info = {
         "host": platform.platform(),
@@ -233,16 +262,17 @@ def platform_toolchain(config):
         "deployment_target": config.get("deployment_target", ""),
     }
     cc = config.get("cc", "cc")
+    info["cc"] = output([cc, "--version"]).splitlines()[0]
     if config["platform"] == "macos":
-        info["cc"] = output([cc, "--version"]).splitlines()[0]
         info["sdk"] = output(["xcrun", "--sdk", "macosx", "--show-sdk-path"])
         info["sdk_version"] = output(["xcrun", "--sdk", "macosx", "--show-sdk-version"])
         info["sysroot"] = info["sdk"]
     else:
-        info["cc"] = output([cc, "--version"]).splitlines()[0]
-        info["sdk"] = config.get("sdk", "")
-        info["sdk_version"] = config.get("sdk_version", "")
-        info["sysroot"] = config.get("sysroot", "")
+        os_release = pathlib.Path("/etc/alpine-release")
+        info["sdk"] = "alpine"
+        info["sdk_version"] = os_release.read_text().strip() if os_release.is_file() else ""
+        info["sysroot"] = output([cc, "-print-sysroot"]) or "/"
+        info["libc"] = f"musl {musl_version()}"
     return info
 
 
@@ -265,16 +295,18 @@ def configure_args_for(profile, target, stage, toolchain):
         "--enable-pic",
         f"--cc={cc}",
     ]
-    if toolchain["sysroot"]:
-        args.append(f"--sysroot={toolchain['sysroot']}")
     extra_cflags = ["-O2", "-fPIC"]
     extra_ldflags = []
     if config["platform"] == "macos":
+        args.append(f"--sysroot={toolchain['sysroot']}")
         target_version = config.get("deployment_target")
         if not target_version:
             fail(f"macOS target {target} lacks deployment_target")
         extra_cflags.append(f"-mmacosx-version-min={target_version}")
         extra_ldflags.append(f"-mmacosx-version-min={target_version}")
+    else:
+        args.append(f"--arch={config['arch']}")
+        extra_cflags.append(f"-march={config['cpu_baseline']}")
     extra_cflags.append(f"-I{stage}/include")
     extra_ldflags.append(f"-L{stage}/lib")
     args.append("--extra-cflags=" + " ".join(extra_cflags))
@@ -301,17 +333,25 @@ def dep_env(config, stage, toolchain):
         ldflags.extend(["-isysroot", toolchain["sdk"]])
         ldflags.append(f"-mmacosx-version-min={config['deployment_target']}")
         env["MACOSX_DEPLOYMENT_TARGET"] = config["deployment_target"]
+    else:
+        cflags.append(f"-march={config['cpu_baseline']}")
     env["CFLAGS"] = " ".join(cflags)
     env["CXXFLAGS"] = env["CFLAGS"]
     env["LDFLAGS"] = " ".join(ldflags)
     return env
 
 
-def ffmpeg_env(stage):
+SYSTEM_PKG_CONFIG_DIRS = ("/usr/lib/pkgconfig", "/usr/share/pkgconfig")
+
+
+def ffmpeg_env(config, stage):
     env = os.environ.copy()
     env["TMPDIR"] = str(TMP_ROOT)
-    env["PKG_CONFIG_PATH"] = str(stage / "lib" / "pkgconfig")
-    env["PKG_CONFIG_LIBDIR"] = str(stage / "lib" / "pkgconfig")
+    search = [str(stage / "lib" / "pkgconfig")]
+    if config.get("system_libraries"):
+        search.extend(SYSTEM_PKG_CONFIG_DIRS)
+    env["PKG_CONFIG_PATH"] = search[0]
+    env["PKG_CONFIG_LIBDIR"] = os.pathsep.join(search)
     return env
 
 
@@ -601,6 +641,7 @@ def manifest_for(profile, target, build_dir, stage, args, toolchain):
         "external_libraries": parse_external_libraries(config_mak),
         "bundled_dependencies": config.get("bundled_dependencies", []),
         "frameworks": config.get("frameworks", []),
+        "system_libraries": config.get("system_libraries", []),
         "toolchain": toolchain,
     }
 
@@ -616,6 +657,7 @@ def build(target, profile_name):
     lock = load_sources()
     profile, profile_path = load_profile(profile_name)
     config = target_config(profile, target)
+    require_native_host(config, target)
     stage = STAGE_ROOT / target / profile_name
     build_dir = BUILD_ROOT / target / profile_name
     toolchain = platform_toolchain(config)
@@ -652,10 +694,10 @@ def build(target, profile_name):
     ffmpeg_build = build_dir / "ffmpeg"
     ffmpeg_build.mkdir()
     print(f"configure FFmpeg {lock['sources']['ffmpeg']['version']}")
-    run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(stage))
+    run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
     print(f"build FFmpeg {lock['sources']['ffmpeg']['version']}")
-    run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(stage))
-    run(["make", "install"], cwd=ffmpeg_build, env=ffmpeg_env(stage))
+    run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
+    run(["make", "install"], cwd=ffmpeg_build, env=ffmpeg_env(config, stage))
 
     prune_stage(stage)
     normalize_pc(stage)
@@ -683,10 +725,77 @@ def build(target, profile_name):
     print(f"staged {stage}")
 
 
+ELF_MACHINE = {
+    "x86_64": "x86-64",
+    "aarch64": "ARM aarch64",
+}
+
+FFMPEG_ARCH_DEFINE = {
+    "x86_64": "ARCH_X86_64",
+    "aarch64": "ARCH_AARCH64",
+}
+
+HOST_CPU_FLAGS = re.compile(r"-m(?:arch|cpu|tune)=native\b")
+
+
+COMPILE_FLAG_VARIABLES = re.compile(r"^(?:CPPFLAGS|CFLAGS|CXXFLAGS|ASFLAGS|LDFLAGS|LDEXEFLAGS)=(.*)$", re.M)
+
+
+def host_cpu_flag_problems(config_mak, arch):
+    flags = " ".join(COMPILE_FLAG_VARIABLES.findall(config_mak))
+    problems = []
+    if HOST_CPU_FLAGS.search(flags):
+        problems.append("host-specific -march/-mcpu/-mtune=native")
+    if arch == "aarch64" and re.search(r"-m(?:sse|avx|mmx|64\b)", flags):
+        problems.append("x86 code-generation flag on aarch64")
+    return problems
+
+
+def pc_declares(pc_texts, library):
+    flag = "-l" + library.removeprefix("lib")
+    for text in pc_texts:
+        for line in text.splitlines():
+            key = line.split(":", 1)[0]
+            if key in ("Requires", "Requires.private") and re.search(
+                rf"(?:^|[\s,:]){re.escape(library)}(?:[\s,]|$)", line
+            ):
+                return True
+            if key in ("Libs", "Libs.private") and re.search(
+                rf"(?:^|\s){re.escape(flag)}(?:\s|$)", line
+            ):
+                return True
+    return False
+
+
+def audit_linux(case, config, stage, ffmpeg_build, config_mak, archives):
+    arch = config["arch"]
+    config_h = (ffmpeg_build / "config.h").read_text()
+    case(
+        f"FFmpeg configured for {arch}",
+        f"#define {FFMPEG_ARCH_DEFINE[arch]} 1" in config_h,
+    )
+    problems = host_cpu_flag_problems(config_mak, arch)
+    case("no host-specific CPU flags", not problems, "; ".join(problems))
+    case(
+        f"CPU baseline -march={config['cpu_baseline']}",
+        f"-march={config['cpu_baseline']}" in " ".join(COMPILE_FLAG_VARIABLES.findall(config_mak)),
+    )
+    glibc = [archive.name for archive in archives if b"GLIBC_" in archive.read_bytes()]
+    case("no glibc symbol versions", not glibc, f"archives: {glibc}")
+    pc_texts = [pc.read_text() for pc in sorted((stage / "lib" / "pkgconfig").glob("libav*.pc"))]
+    for library in config.get("system_libraries", []):
+        case(f"pkg-config declares {library}", pc_declares(pc_texts, library))
+    print(
+        "abi: static archives for musl; no symbol versioning; "
+        f"system libraries linked by the consumer: {config.get('system_libraries', [])}"
+    )
+
+
 def audit(target, profile_name):
     lock = load_sources()
     profile, _ = load_profile(profile_name)
     config = target_config(profile, target)
+    require_native_host(config, target)
     stage = STAGE_ROOT / target / profile_name
     build_dir = BUILD_ROOT / target / profile_name
     results = []
@@ -799,6 +908,10 @@ def audit(target, profile_name):
             manifest.get("bundled_dependencies") == config.get("bundled_dependencies", []),
         )
         case("manifest frameworks", manifest.get("frameworks") == config.get("frameworks", []))
+        case(
+            "manifest system libraries",
+            manifest.get("system_libraries") == config.get("system_libraries", []),
+        )
         toolchain = manifest.get("toolchain", {})
         case(
             "manifest toolchain",
@@ -807,6 +920,12 @@ def audit(target, profile_name):
             and bool(toolchain.get("cpu_baseline")),
             f"toolchain: {toolchain}",
         )
+        if config["platform"] == "linux":
+            case(
+                "manifest libc is musl",
+                toolchain.get("libc", "").startswith("musl "),
+                f"libc: {toolchain.get('libc')!r}",
+            )
         case("manifest configure arguments", manifest.get("configure_args") == args)
         case("manifest effective configure", manifest.get("configure") == configuration)
 
@@ -871,7 +990,9 @@ def audit(target, profile_name):
                 if config["platform"] == "macos" and "Mach-O" not in line:
                     archive_problems.append(f"{archive.name}: {line}")
                     break
-                if config["platform"] == "linux" and "ELF" not in line:
+                if config["platform"] == "linux" and (
+                    "ELF" not in line or ELF_MACHINE[config["arch"]] not in line
+                ):
                     archive_problems.append(f"{archive.name}: {line}")
                     break
         finally:
@@ -882,6 +1003,9 @@ def audit(target, profile_name):
         not archive_problems,
         "; ".join(archive_problems[:5]),
     )
+
+    if config["platform"] == "linux":
+        audit_linux(case, config, stage, build_dir / "ffmpeg", config_mak, archives)
 
     passed = sum(1 for result in results if result)
     failed = len(results) - passed

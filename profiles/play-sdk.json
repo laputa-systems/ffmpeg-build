@@ -102,6 +102,69 @@
       "bundled_dependencies": [
         "dav1d",
         "zlib"
+      ],
+      "system_libraries": []
+    },
+    "x86_64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "x86_64",
+      "cpu_baseline": "x86-64",
+      "configure_flags": [
+        "--enable-vaapi"
+      ],
+      "components": {
+        "decoders": [
+          "av1"
+        ],
+        "hwaccels": [
+          "h264_vaapi",
+          "hevc_vaapi",
+          "vp9_vaapi",
+          "av1_vaapi"
+        ]
+      },
+      "frameworks": [],
+      "system_libraries": [
+        "libva",
+        "libva-drm"
+      ],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
+      ]
+    },
+    "aarch64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "aarch64",
+      "cpu_baseline": "armv8-a",
+      "configure_flags": [
+        "--enable-vaapi"
+      ],
+      "components": {
+        "decoders": [
+          "av1"
+        ],
+        "hwaccels": [
+          "h264_vaapi",
+          "hevc_vaapi",
+          "vp9_vaapi",
+          "av1_vaapi"
+        ]
+      },
+      "frameworks": [],
+      "system_libraries": [
+        "libva",
+        "libva-drm"
+      ],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
       ]
     }
   }
