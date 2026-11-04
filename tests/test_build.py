@@ -73,6 +73,27 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(build.gnu_stack_size(headers), 2 * 1024 * 1024)
         self.assertIsNone(build.gnu_stack_size("  LOAD 0x0 0x0 0x0 0x10 0x10 R 0x1000\n"))
 
+    def test_parse_archive_name(self):
+        parsed = build.parse_archive_name("ffmpeg-9.0.2+20261104-r2-x86_64-unknown-linux-musl-play-sdk.tar.gz")
+        self.assertEqual(
+            parsed,
+            {"upstream": "9.0.2", "tag": "20261104-r2", "target": "x86_64-unknown-linux-musl", "profile": "play-sdk"},
+        )
+        parsed = build.parse_archive_name("ffmpeg-9.0.2+local-aarch64-apple-darwin-tools.tar.gz")
+        self.assertEqual(parsed["target"], "aarch64-apple-darwin")
+        with self.assertRaises(SystemExit):
+            build.parse_archive_name("ffmpeg-9.0.2-aarch64-apple-darwin-tools.tar.gz")
+
+    def test_release_tag_format(self):
+        for tag in ("20261104", "20261104-r2", "local"):
+            self.assertTrue(build.RELEASE_TAG.match(tag), tag)
+        for tag in ("2026-11-04", "20261104-2", "latest", "20261104+x"):
+            self.assertFalse(build.RELEASE_TAG.match(tag), tag)
+
+    def test_absolute_build_tree_marker(self):
+        self.assertTrue(build.ABSOLUTE_BUILD_TREE.search(b"/home/runner/x/.work/build/a.c"))
+        self.assertFalse(build.ABSOLUTE_BUILD_TREE.search(b"./.work/build/a.c"))
+
 
 class StageTests(unittest.TestCase):
     def setUp(self):
@@ -133,6 +154,28 @@ class StageTests(unittest.TestCase):
         clean.write_bytes(b"./libavutil/log.c")
         dirty.write_bytes(str(build.ROOT).encode() + b"/.work/build/x.c")
         self.assertEqual(build.build_prefix_leaks(self.stage), ["lib/dirty.a"])
+
+    def test_deterministic_archive(self):
+        files = {"bin/ffmpeg": (b"binary", True), "README": (b"readme", False)}
+        first = self.stage / "first.tar.gz"
+        second = self.stage / "second.tar.gz"
+        build.write_deterministic_archive(first, "root", files)
+        build.write_deterministic_archive(second, "root", dict(reversed(list(files.items()))))
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        with build.tarfile.open(first) as archive:
+            members = archive.getmembers()
+        self.assertEqual([member.name for member in members], ["root", "root/bin", "root/README", "root/bin/ffmpeg"])
+        self.assertEqual(build.archive_member_problems(members, "root"), [])
+        self.assertEqual(members[3].mode, 0o755)
+        self.assertEqual(members[2].mode, 0o644)
+
+    def test_archive_member_problems(self):
+        escape = build.tarfile.TarInfo("root/../evil")
+        link = build.tarfile.TarInfo("root/link")
+        link.type = build.tarfile.SYMTYPE
+        outside = build.tarfile.TarInfo("other/file")
+        problems = build.archive_member_problems([escape, link, outside], "root")
+        self.assertEqual(len(problems), 3)
 
 
 if __name__ == "__main__":

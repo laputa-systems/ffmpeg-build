@@ -10,8 +10,11 @@ import platform
 import re
 import shlex
 import shutil
+import gzip
+import io
 import subprocess
 import sys
+import tarfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
 WORK = ROOT / ".work"
@@ -21,6 +24,35 @@ STAGE_ROOT = WORK / "stage"
 TMP_ROOT = WORK / "tmp"
 INSTALL_PREFIX = "/opt/ffmpeg-build"
 MUSL_THREAD_STACK_BYTES = 2 * 1024 * 1024
+DIST = ROOT / "dist"
+LICENSE_FILES = {
+    "ffmpeg": ("LICENSE.md", "COPYING.LGPLv2.1", "CREDITS"),
+    "dav1d": ("COPYING",),
+    "zlib": ("LICENSE",),
+}
+FFMPEG_LICENSE = "LGPL version 2.1 or later"
+RELEASE_TAG = re.compile(r"(?:local|[0-9]{8}(?:-r[0-9]+)?)\Z")
+ARCHIVE_NAME = re.compile(
+    r"ffmpeg-(?P<upstream>[0-9]+(?:\.[0-9]+)*)\+(?P<tag>local|[0-9]{8}(?:-r[0-9]+)?)"
+    r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)-(?P<profile>play-sdk|tools)\.tar\.gz\Z"
+)
+MANIFEST_KEYS = (
+    "contract",
+    "profile",
+    "target",
+    "sources",
+    "producer",
+    "configure_args",
+    "components",
+    "auto_selected",
+    "external_libraries",
+    "bundled_dependencies",
+    "frameworks",
+    "system_libraries",
+    "toolchain",
+    "license",
+)
+ABSOLUTE_BUILD_TREE = re.compile(rb"[^.]/\.work/(?:build|stage)/")
 
 COMPONENT_CATEGORIES = (
     "demuxers",
@@ -626,7 +658,16 @@ def finish_programs(config, stage):
             run(["strip", "--strip-all", str(binary)])
 
 
+def notice_paths():
+    paths = ["README"]
+    for name, files in LICENSE_FILES.items():
+        paths.extend(f"share/licenses/{name}/{filename}" for filename in files)
+    return paths
+
+
 def stage_complete(stage, artifact):
+    if not all((stage / path).is_file() for path in notice_paths()):
+        return False
     if artifact == "tools":
         required = (*(f"bin/{name}" for name in TOOLS_PROGRAMS), "share/ffmpeg-build/manifest.json")
         return all((stage / path).is_file() for path in required)
@@ -695,7 +736,38 @@ def manifest_for(profile, target, build_dir, stage, args, toolchain):
         "frameworks": config.get("frameworks", []),
         "system_libraries": config.get("system_libraries", []),
         "toolchain": toolchain,
+        "license": parse_license(build_dir),
     }
+
+
+def parse_license(ffmpeg_build):
+    match = re.search(r'#define FFMPEG_LICENSE "([^"]+)"', (ffmpeg_build / "config.h").read_text())
+    if not match:
+        fail(f"no FFMPEG_LICENSE in {ffmpeg_build / 'config.h'}")
+    return match.group(1)
+
+
+def install_notices(profile, target, sources, stage):
+    for name, files in LICENSE_FILES.items():
+        destination = stage / "share" / "licenses" / name
+        destination.mkdir(parents=True, exist_ok=True)
+        for filename in files:
+            shutil.copyfile(sources[name] / filename, destination / filename)
+    if profile["artifact"] == "sdk":
+        contents = (
+            "include/            FFmpeg, dav1d, and zlib headers\n"
+            "lib/*.a             static FFmpeg libraries, libdav1d.a, libz.a\n"
+            "lib/pkgconfig/      relocatable pkg-config files; use pkg-config --static\n"
+        )
+    else:
+        contents = "bin/ffmpeg, bin/ffprobe   static, headless; no network protocols or devices\n"
+    (stage / "README").write_text(
+        f"FFmpeg {profile['profile']} for {target}\n"
+        "Built by https://github.com/laputa-systems/ffmpeg-build from pinned upstream sources.\n\n"
+        + contents
+        + "share/ffmpeg-build/manifest.json   sources, configuration, components, toolchain\n"
+        "share/licenses/     upstream licenses and notices for FFmpeg, dav1d, and zlib\n"
+    )
 
 
 def write_manifest(stage, manifest):
@@ -755,6 +827,12 @@ def build(target, profile_name):
     shutil.rmtree(install_root)
 
     prune_stage(stage, artifact)
+    install_notices(
+        profile,
+        target,
+        {"ffmpeg": ffmpeg_source, "dav1d": dav1d_source, "zlib": zlib_source},
+        stage,
+    )
     if artifact == "tools":
         finish_programs(config, stage)
     if artifact == "sdk":
@@ -961,6 +1039,7 @@ def audit(target, profile_name):
             )
         case("manifest configure arguments", manifest.get("configure_args") == args)
         case("manifest effective configure", manifest.get("configure") == configuration)
+        case("manifest license", manifest.get("license") == FFMPEG_LICENSE, f"license: {manifest.get('license')!r}")
 
     case(
         "external libraries allowed",
@@ -975,6 +1054,10 @@ def audit(target, profile_name):
     case("no LTO flags", "-flto" not in config_mak)
     if config["platform"] == "linux":
         audit_linux_config(case, config, ffmpeg_build, config_mak)
+
+    missing_notices = [path for path in notice_paths() if not (stage / path).is_file()]
+    case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
+    case("no GPL or nonfree code", not re.search(r"^CONFIG_(?:GPL|NONFREE|VERSION3)=yes$", config_mak, re.M))
 
     leaked = build_prefix_leaks(stage)
     case("no absolute build prefix in artifact", not leaked, f"files: {leaked[:10]}")
@@ -1172,15 +1255,178 @@ def audit_tools(case, config, stage, version):
             case(f"{name} has no Apple encoders", not apple, f"found: {apple}")
 
 
+def archive_name(version, tag, target, profile_name):
+    return f"ffmpeg-{version}+{tag}-{target}-{profile_name}"
+
+
+def tar_entry(name, mode, size=0, kind=tarfile.REGTYPE):
+    info = tarfile.TarInfo(name)
+    info.type = kind
+    info.mode = mode
+    info.size = size
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.mtime = 0
+    return info
+
+
+def write_deterministic_archive(path, root_name, files):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + ".part")
+    directories = {root_name}
+    for relative in files:
+        parent = pathlib.PurePosixPath(relative).parent
+        while str(parent) != ".":
+            directories.add(f"{root_name}/{parent}")
+            parent = parent.parent
+    with part.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                for directory in sorted(directories):
+                    archive.addfile(tar_entry(directory, 0o755, kind=tarfile.DIRTYPE))
+                for relative in sorted(files):
+                    data, executable = files[relative]
+                    info = tar_entry(f"{root_name}/{relative}", 0o755 if executable else 0o644, len(data))
+                    archive.addfile(info, io.BytesIO(data))
+    part.replace(path)
+
+
+def package(target, profile_name, tag):
+    if not RELEASE_TAG.match(tag):
+        fail(f"release tag {tag!r} must be YYYYMMDD, YYYYMMDD-rN, or local")
+    lock = load_sources()
+    profile, _ = load_profile(profile_name)
+    target_config(profile, target)
+    stage, _, _ = build_paths(profile_name, target)
+    if not stage_complete(stage, profile["artifact"]):
+        fail(f"stage {stage} is incomplete; run build first")
+    manifest = json.loads((stage / "share" / "ffmpeg-build" / "manifest.json").read_text())
+    version = lock["sources"]["ffmpeg"]["version"]
+    if manifest.get("profile") != profile_name or manifest.get("target") != target:
+        fail(f"stage manifest is for {manifest.get('profile')}/{manifest.get('target')}")
+    if manifest.get("sources", {}).get("ffmpeg", {}).get("version") != version:
+        fail("stage manifest FFmpeg version disagrees with sources.lock.json")
+    name = archive_name(version, tag, target, profile_name)
+    manifest["release"] = {"tag": tag, "archive": f"{name}.tar.gz"}
+    files = {}
+    for path in sorted(stage.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            if path.is_symlink():
+                fail(f"stage contains a symlink: {path}")
+            continue
+        relative = path.relative_to(stage).as_posix()
+        files[relative] = (path.read_bytes(), os.access(path, os.X_OK))
+    files["share/ffmpeg-build/manifest.json"] = (
+        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
+        False,
+    )
+    destination = DIST / f"{name}.tar.gz"
+    write_deterministic_archive(destination, name, files)
+    print(f"{sha256_file(destination)}  {destination.name}")
+    return destination
+
+
+def parse_archive_name(filename):
+    match = ARCHIVE_NAME.match(filename)
+    if not match:
+        fail(f"{filename} is not ffmpeg-<upstream>+<tag>-<target>-<profile>.tar.gz")
+    return match.groupdict()
+
+
+def archive_member_problems(members, root_name):
+    problems = []
+    for member in members:
+        path = pathlib.PurePosixPath(member.name)
+        if path.is_absolute() or ".." in path.parts:
+            problems.append(f"unsafe path {member.name}")
+        elif path.parts[0] != root_name:
+            problems.append(f"outside root {member.name}")
+        if not (member.isfile() or member.isdir()):
+            problems.append(f"not a file or directory: {member.name}")
+        if member.uid or member.gid or member.mtime:
+            problems.append(f"non-normalized owner or mtime: {member.name}")
+    return problems
+
+
+def qualify(archive_path):
+    archive_path = archive_path.resolve()
+    parsed = parse_archive_name(archive_path.name)
+    lock = load_sources()
+    profile_name, target, tag = parsed["profile"], parsed["target"], parsed["tag"]
+    profile, _ = load_profile(profile_name)
+    config = target_config(profile, target)
+    require_native_host(config, target)
+    root_name = archive_path.name.removesuffix(".tar.gz")
+    check = Audit()
+    case = check.case
+
+    work = TMP_ROOT / "qualify" / root_name / "path with spaces"
+    if work.parent.exists():
+        shutil.rmtree(work.parent)
+    work.mkdir(parents=True)
+    with tarfile.open(archive_path, "r:gz") as archive:
+        members = archive.getmembers()
+        problems = archive_member_problems(members, root_name)
+        case("archive members are normalized and under the root", not problems, "; ".join(problems[:5]))
+        if problems:
+            return check.finish()
+        archive.extractall(work, filter="data")
+    prefix = work / root_name
+    case(f"archive root is {root_name}", prefix.is_dir())
+
+    manifest = read_manifest(check, prefix)
+    missing = [key for key in MANIFEST_KEYS if key not in manifest]
+    case("manifest has the contract keys", not missing, f"missing: {missing}")
+    case("manifest profile matches name", manifest.get("profile") == profile_name)
+    case("manifest target matches name", manifest.get("target") == target)
+    case(
+        "manifest FFmpeg version matches name",
+        manifest.get("sources", {}).get("ffmpeg", {}).get("version") == parsed["upstream"]
+        == lock["sources"]["ffmpeg"]["version"],
+    )
+    case(
+        "manifest sources match the lock",
+        all(
+            manifest.get("sources", {}).get(name, {}).get("sha256") == lock["sources"][name]["sha256"]
+            for name in profile["sources"]
+        ),
+    )
+    case(
+        "manifest release matches name",
+        manifest.get("release") == {"tag": tag, "archive": archive_path.name},
+    )
+    missing_notices = [path for path in notice_paths() if not (prefix / path).is_file()]
+    case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
+    leaked = sorted(
+        str(path.relative_to(prefix))
+        for path in prefix.rglob("*")
+        if path.is_file() and ABSOLUTE_BUILD_TREE.search(path.read_bytes())
+    )
+    case("no absolute build-tree path in any file", not leaked, f"files: {leaked[:10]}")
+
+    script = ROOT / "tests" / ("qualify-sdk.sh" if profile["artifact"] == "sdk" else "qualify-tools.sh")
+    result = subprocess.run(["bash", str(script), str(prefix), target], check=False)
+    case(f"{script.name} passes", result.returncode == 0)
+    return check.finish()
+
+
 def main():
+    if sys.version_info < (3, 12):
+        fail(f"build.py needs Python 3.12 or newer for safe tar extraction; this is {platform.python_version()}")
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for name in ("fetch", "build", "audit"):
+    for name in ("fetch", "build", "audit", "package"):
         command = subparsers.add_parser(name)
         command.add_argument("--target", required=True)
         command.add_argument("--profile", required=True)
+        if name == "package":
+            command.add_argument("--tag", required=True)
+    qualify_command = subparsers.add_parser("qualify")
+    qualify_command.add_argument("--archive", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
+    if args.command == "qualify":
+        return qualify(args.archive)
     profile, _ = load_profile(args.profile)
     target_config(profile, args.target)
     if args.command == "fetch":
@@ -1191,6 +1437,9 @@ def main():
         return 0
     if args.command == "audit":
         return audit(args.target, args.profile)
+    if args.command == "package":
+        package(args.target, args.profile, args.tag)
+        return 0
     return 2
 
 
