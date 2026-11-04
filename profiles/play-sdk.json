@@ -1,0 +1,108 @@
+{
+  "contract": 1,
+  "profile": "play-sdk",
+  "description": "Static playback SDK: demuxers, video and image decoders, parsers, filters, and platform hardware decode. No encoders, muxers, devices, or network.",
+  "sources": [
+    "ffmpeg",
+    "dav1d",
+    "zlib"
+  ],
+  "components": {
+    "demuxers": [
+      "mov",
+      "matroska",
+      "avi",
+      "mp3",
+      "flac",
+      "wav",
+      "ogg"
+    ],
+    "decoders": [
+      "h264",
+      "hevc",
+      "libdav1d",
+      "vp9",
+      "mpeg4",
+      "png",
+      "mjpeg"
+    ],
+    "subtitle_decoders": [],
+    "parsers": [
+      "h264",
+      "hevc",
+      "av1",
+      "vp9",
+      "mpeg4video",
+      "aac",
+      "mpegaudio",
+      "opus",
+      "vorbis",
+      "flac"
+    ],
+    "bsfs": [
+      "h264_mp4toannexb",
+      "hevc_mp4toannexb",
+      "vp9_superframe",
+      "aac_adtstoasc",
+      "extract_extradata",
+      "null"
+    ],
+    "filters": [
+      "format",
+      "scale",
+      "aresample",
+      "aformat",
+      "fps",
+      "setpts",
+      "crop",
+      "transpose",
+      "hflip",
+      "vflip",
+      "hwdownload",
+      "hwupload",
+      "trim",
+      "atrim",
+      "concat",
+      "volume",
+      "pan",
+      "channelsplit",
+      "null",
+      "anull"
+    ],
+    "hwaccels": [],
+    "protocols": [
+      "file"
+    ]
+  },
+  "targets": {
+    "aarch64-apple-darwin": {
+      "platform": "macos",
+      "arch": "aarch64",
+      "deployment_target": "27.0",
+      "cpu_baseline": "arm64",
+      "configure_flags": [
+        "--enable-videotoolbox"
+      ],
+      "components": {
+        "hwaccels": [
+          "h264_videotoolbox",
+          "hevc_videotoolbox"
+        ]
+      },
+      "frameworks": [
+        "VideoToolbox",
+        "CoreFoundation",
+        "CoreMedia",
+        "CoreVideo",
+        "CoreServices"
+      ],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
+      ]
+    }
+  }
+}

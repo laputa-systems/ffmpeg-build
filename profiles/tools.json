@@ -1,0 +1,39 @@
+{
+  "contract": 1,
+  "profile": "tools",
+  "description": "Headless ffmpeg and ffprobe pair for local postprocessing. No playback SDK, devices, network, or ffplay.",
+  "sources": [
+    "ffmpeg",
+    "dav1d",
+    "zlib"
+  ],
+  "components": {},
+  "targets": {
+    "aarch64-apple-darwin": {
+      "platform": "macos",
+      "arch": "aarch64",
+      "deployment_target": "27.0",
+      "cpu_baseline": "arm64",
+      "configure_flags": [
+        "--enable-videotoolbox",
+        "--enable-audiotoolbox"
+      ],
+      "components": {},
+      "frameworks": [
+        "VideoToolbox",
+        "AudioToolbox",
+        "CoreFoundation",
+        "CoreMedia",
+        "CoreVideo",
+        "CoreServices"
+      ],
+      "external_libraries": [
+        "dav1d"
+      ],
+      "bundled_dependencies": [
+        "dav1d",
+        "zlib"
+      ]
+    }
+  }
+}
