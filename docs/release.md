@@ -47,3 +47,37 @@ Every action is pinned to a full commit SHA. The Alpine images are pinned by dig
 5. `usr` discovers the new tools release from `releases.atom`.
 
 Never point a consumer at a tag before its release and checksums exist.
+
+## Current release: `20261104`
+
+Built from `d611d42`; FFmpeg 9.0.2, dav1d 1.5.4, zlib 1.3.2.
+
+| Target | `play-sdk` | `tools` | Consumer links (SDK) | Tools runtime dependencies |
+| --- | ---: | ---: | --- | --- |
+| `aarch64-apple-darwin` | 13,792,303 B | 7,528,937 B | VideoToolbox, CoreFoundation, CoreMedia, CoreVideo, CoreServices | `libSystem` and the AudioToolbox, VideoToolbox, CoreFoundation, CoreMedia, CoreVideo, CoreServices frameworks |
+| `x86_64-unknown-linux-musl` | 20,864,634 B | 11,040,731 B | system `libva`, `libva-drm` | none (static-pie) |
+| `aarch64-unknown-linux-musl` | 18,561,352 B | 9,571,783 B | system `libva`, `libva-drm`, `libatomic` | none (static-pie) |
+
+Consumers:
+
+```sh
+# Player: pin ffmpeg-sdk.lock.json to the release, then
+scripts/fetch-ffmpeg-sdk.sh aarch64-apple-darwin
+scripts/release.sh
+# usr: installs or repairs the tools pair from the newest release in releases.atom
+sh dl ffmpeg
+```
+
+Player `v0.42.1` is the first Player release linked against this SDK. `usr` installs `tools` by default on Darwin arm64, Linux x86-64, and Linux arm64.
+
+Supported `tools` workflows: ffprobe JSON; yt-dlp merge of h264/hevc/vp9/av1 video with aac/opus audio into mp4; `--convert-subs srt`; `--embed-metadata` with chapters; `--embed-thumbnail` (webp to png, png/jpeg as `attached_pic`); m4a/webm/mp3 metadata; mkv/ts remux to mp4 with `mov_text`; and on macOS the `encode` HEVC (`hevc_videotoolbox`) + AAC (`aac_at`) + `mov_text` command.
+
+Intentional limitations: no network protocols (yt-dlp downloads), no devices, no `ffplay`, no encoders beyond PNG, SubRip, `mov_text`, and the two macOS AudioToolbox/VideoToolbox encoders; Linux has no HEVC encoder, so `encode` is macOS-only. x86-64 Linux is built and qualified only on GitHub's native runners.
+
+## Guarantees added after `20261104`
+
+- `release.yml` cuts releases only from `main`, and `prepare` refuses an existing release before the build matrix runs.
+- Tags must be real dates: `resolve_release.py` and `build.py package` reject `YYYYMMDD` values that are not calendar dates.
+- `build.py` fails if `git rev-parse HEAD` is not a commit hash. `audit` and `qualify` require one in the manifest, and `assemble_release.py` rejects an archive whose manifest commit is not `GITHUB_SHA`.
+
+The `20261104` archives already carry commit `d611d42`, the release commit, so they meet these checks.

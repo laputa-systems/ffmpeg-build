@@ -20,7 +20,7 @@ class ResolveReleaseTests(unittest.TestCase):
         self.assertEqual(resolve_release.resolve_release_tag(" 20261104-r2 ", SHA, SHA), "20261104-r2")
 
     def test_rejects_other_formats(self):
-        for tag in ("v1.0", "2026-11-04", "20261104-2", "latest"):
+        for tag in ("v1.0", "2026-11-04", "20261104-2", "latest", "20269999", "20261332-r2"):
             with self.assertRaises(ValueError):
                 resolve_release.resolve_release_tag(tag, SHA, SHA)
 

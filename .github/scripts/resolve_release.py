@@ -20,6 +20,10 @@ def resolve_release_tag(
     tag = requested.strip() or (now or datetime.now(UTC)).strftime("%Y%m%d")
     if not TAG_PATTERN.fullmatch(tag):
         raise ValueError(f"release tag must be YYYYMMDD or YYYYMMDD-rN: {tag!r}")
+    try:
+        datetime.strptime(tag[:8], "%Y%m%d")
+    except ValueError:
+        raise ValueError(f"release tag date is not a real date: {tag!r}") from None
     if not SHA_PATTERN.fullmatch(github_sha):
         raise ValueError("GITHUB_SHA must be a full commit hash")
     if checkout_sha.lower() != github_sha.lower():

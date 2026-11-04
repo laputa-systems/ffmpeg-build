@@ -24,12 +24,14 @@ class AssembleReleaseTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def write_assets(self, names):
+    def write_assets(self, names, commit="c" * 40):
         paths = []
         for index, name in enumerate(names):
             path = self.source / str(index) / name
             path.parent.mkdir()
-            path.write_bytes(name.encode())
+            manifest = json.dumps({"producer": {"commit": commit}}).encode()
+            root = name.removesuffix(".tar.gz")
+            build.write_deterministic_archive(path, root, {"share/ffmpeg-build/manifest.json": (manifest, False)})
             paths.append(path)
         return paths
 
@@ -49,6 +51,11 @@ class AssembleReleaseTests(unittest.TestCase):
         names[0] = names[0].replace("20261104", "20261103")
         with self.assertRaises(ValueError):
             assemble_release.assemble(self.write_assets(names), self.root / "release", "9.0.2", "20261104", "c" * 40)
+
+    def test_rejects_archive_from_other_commit(self):
+        names = assemble_release.expected_assets("9.0.2", "20261104")
+        with self.assertRaises(ValueError):
+            assemble_release.assemble(self.write_assets(names, "d" * 40), self.root / "release", "9.0.2", "20261104", "c" * 40)
 
     def test_names_match_build_naming(self):
         for name in assemble_release.expected_assets("9.0.2", "20261104-r2"):

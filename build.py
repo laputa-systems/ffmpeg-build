@@ -2,6 +2,7 @@
 """Build, audit, and inspect the pinned FFmpeg profiles."""
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -696,11 +697,26 @@ def stage_complete(stage, artifact):
     return all((stage / path).is_file() for path in required)
 
 
+COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+
+
 def git_commit():
+    commit = output(["git", "-C", str(ROOT), "rev-parse", "HEAD"])
+    if not COMMIT.match(commit):
+        fail(f"git rev-parse HEAD returned {commit!r}, not a commit hash")
+    return commit
+
+
+def valid_release_tag(tag):
+    if not RELEASE_TAG.match(tag):
+        return False
+    if tag == "local":
+        return True
     try:
-        return output(["git", "-C", str(ROOT), "rev-parse", "HEAD"])
-    except SystemExit:
-        return "unknown"
+        datetime.datetime.strptime(tag[:8], "%Y%m%d")
+    except ValueError:
+        return False
+    return True
 
 
 def manifest_for(profile, target, build_dir, stage, args, toolchain):
@@ -998,7 +1014,7 @@ def audit(target, profile_name):
     manifest = read_manifest(check, stage)
     if manifest:
         case("manifest contract", manifest.get("contract") == 1)
-        case("manifest producer", bool(manifest.get("producer", {}).get("commit")))
+        case("manifest producer commit", bool(COMMIT.match(manifest.get("producer", {}).get("commit", ""))))
         case(
             "manifest profile and target",
             manifest.get("profile") == profile_name and manifest.get("target") == target,
@@ -1292,8 +1308,8 @@ def write_deterministic_archive(path, root_name, files):
 
 
 def package(target, profile_name, tag):
-    if not RELEASE_TAG.match(tag):
-        fail(f"release tag {tag!r} must be YYYYMMDD, YYYYMMDD-rN, or local")
+    if not valid_release_tag(tag):
+        fail(f"release tag {tag!r} must be a real YYYYMMDD date, YYYYMMDD-rN, or local")
     lock = load_sources()
     profile, _ = load_profile(profile_name)
     target_config(profile, target)
@@ -1390,6 +1406,10 @@ def qualify(archive_path):
             manifest.get("sources", {}).get(name, {}).get("sha256") == lock["sources"][name]["sha256"]
             for name in profile["sources"]
         ),
+    )
+    case(
+        "manifest producer commit is a commit hash",
+        bool(COMMIT.match(manifest.get("producer", {}).get("commit", ""))),
     )
     case(
         "manifest release matches name",

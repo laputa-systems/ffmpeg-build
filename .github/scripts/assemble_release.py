@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import sys
+import tarfile
 from pathlib import Path
 
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
@@ -24,6 +25,18 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def manifest_commit(path: Path) -> str | None:
+    member = f"{path.name.removesuffix('.tar.gz')}/share/ffmpeg-build/manifest.json"
+    with tarfile.open(path, "r:gz") as archive:
+        try:
+            handle = archive.extractfile(member)
+        except KeyError:
+            raise ValueError(f"{path.name} has no {member}") from None
+        if handle is None:
+            raise ValueError(f"{path.name}: {member} is not a file")
+        return json.load(handle).get("producer", {}).get("commit")
+
+
 def assemble(found: list[Path], destination: Path, upstream: str, tag: str, commit: str) -> dict:
     wanted = expected_assets(upstream, tag)
     by_name: dict[str, Path] = {}
@@ -35,6 +48,10 @@ def assemble(found: list[Path], destination: Path, upstream: str, tag: str, comm
         missing = sorted(set(wanted) - set(by_name))
         extra = sorted(set(by_name) - set(wanted))
         raise ValueError(f"asset set mismatch: missing {missing}, unexpected {extra}")
+    for name in wanted:
+        found_commit = manifest_commit(by_name[name])
+        if found_commit != commit:
+            raise ValueError(f"{name} was built from {found_commit!r}, not {commit}")
     destination.mkdir(parents=True, exist_ok=False)
     assets = []
     for name in wanted:

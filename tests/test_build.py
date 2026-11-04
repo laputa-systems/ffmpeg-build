@@ -89,6 +89,8 @@ class ProfileTests(unittest.TestCase):
             self.assertTrue(build.RELEASE_TAG.match(tag), tag)
         for tag in ("2026-11-04", "20261104-2", "latest", "20261104+x"):
             self.assertFalse(build.RELEASE_TAG.match(tag), tag)
+        self.assertTrue(build.valid_release_tag("20261104-r2"))
+        self.assertFalse(build.valid_release_tag("20269999"))
 
     def test_absolute_build_tree_marker(self):
         self.assertTrue(build.ABSOLUTE_BUILD_TREE.search(b"/home/runner/x/.work/build/a.c"))

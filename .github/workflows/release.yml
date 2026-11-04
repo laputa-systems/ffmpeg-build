@@ -37,11 +37,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Require the default branch
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "releases are cut from main, not $GITHUB_REF" >&2
+            exit 1
+          fi
+
       - name: Resolve release tag
         id: tag
         env:
           RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
         run: python3 .github/scripts/resolve_release.py
+
+      - name: Refuse an existing release early
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; rerun with a new YYYYMMDD-rN tag" >&2
+            exit 1
+          fi
 
       - name: Read upstream version
         id: upstream
