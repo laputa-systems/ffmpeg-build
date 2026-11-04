@@ -65,6 +65,14 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(build.pc_declares(texts, "libva-drm"))
         self.assertFalse(build.pc_declares(["Libs.private: -lva-drm\n"], "libva"))
 
+    def test_gnu_stack_size(self):
+        headers = (
+            "  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n"
+            "  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x200000 RW  0x10\n"
+        )
+        self.assertEqual(build.gnu_stack_size(headers), 2 * 1024 * 1024)
+        self.assertIsNone(build.gnu_stack_size("  LOAD 0x0 0x0 0x0 0x10 0x10 R 0x1000\n"))
+
 
 class StageTests(unittest.TestCase):
     def setUp(self):

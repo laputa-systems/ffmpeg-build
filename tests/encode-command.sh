@@ -37,7 +37,7 @@ check() {
 }
 
 has_encoder() {
-    "$ffmpeg" -hide_banner -encoders | awk '{ print $2 }' | grep -qx "$1"
+    "$ffmpeg" -hide_banner -encoders | awk -v want="$1" '$2 == want { found = 1 } END { exit !found }'
 }
 
 archive_hevc_encode() {

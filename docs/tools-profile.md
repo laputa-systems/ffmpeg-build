@@ -12,6 +12,15 @@ tests/tools-workflows.sh .work/stage/aarch64-apple-darwin/tools
 tests/encode-command.sh .work/stage/aarch64-apple-darwin/tools
 ```
 
+Linux targets build natively in the pinned Alpine image:
+
+```sh
+scripts/linux-build.sh x86_64-unknown-linux-musl tools
+scripts/linux-build.sh aarch64-unknown-linux-musl tools
+```
+
+For `tools`, the script runs `build` and `audit`, generates fixtures in the `fixtures` image if they are missing, then copies the stage out of the build tree. It runs `tests/tools-workflows.sh` in the `runtime` image, a clean Alpine with only `bash`, `file`, and `python3`. That container mounts the copied prefix read-only and has no `/work`, so the pair cannot reach the build prefix.
+
 `tests/fixtures/gen.sh` needs a full host FFmpeg 9.0.2: Homebrew on macOS, or the Alpine `ffmpeg` package in the `fixtures` stage of `docker/Dockerfile`. That FFmpeg is only a test dependency. The `tools` profile is not expanded to generate fixtures.
 
 The stage holds only `bin/ffmpeg`, `bin/ffprobe`, and `share/ffmpeg-build/manifest.json`. zlib and dav1d build into `.work/build/<target>/tools/deps` and link statically. The binaries are stripped, and on macOS ad-hoc signed.
@@ -63,3 +72,18 @@ tools-workflows: 55 passed, 0 failed
 encode-command: 24 passed, 0 failed (Apple Silicon, VideoToolbox executed)
 ffmpeg 8,756,256 B, ffprobe 8,570,544 B (stripped, ad-hoc signed)
 ```
+
+## Linux
+
+Linux `tools` links with `-static-pie -Wl,-z,stack-size=2097152`. The result is a static-pie ELF with no `INTERP` and no `NEEDED`, and no `GLIBC_` symbol version anywhere. VA-API, VideoToolbox, and AudioToolbox are absent; the audit checks that `hevc_videotoolbox` and `aac_at` are not in `-encoders`.
+
+musl's default thread stack is 128 KiB, and FFmpeg's threaded demux/mux path overflows it. Without the larger stack, the mpegts-to-mp4 fixup segfaulted on aarch64. musl takes the default thread stack size from `PT_GNU_STACK`, so the link flag fixes it. The audit fails if `PT_GNU_STACK` is not exactly 2 MiB.
+
+```text
+audit: 59 passed, 0 failed (both targets)
+tools-workflows in clean Alpine: 55 passed, 0 failed (both targets)
+x86_64:  ffmpeg 14,317,816 B, ffprobe 14,092,472 B (static-pie, stripped)
+aarch64: ffmpeg 10,033,760 B, ffprobe  9,771,584 B (static-pie, stripped)
+```
+
+`encode` is macOS-only; Linux has no HEVC encoder.

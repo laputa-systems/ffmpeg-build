@@ -20,6 +20,7 @@ BUILD_ROOT = WORK / "build"
 STAGE_ROOT = WORK / "stage"
 TMP_ROOT = WORK / "tmp"
 INSTALL_PREFIX = "/opt/ffmpeg-build"
+MUSL_THREAD_STACK_BYTES = 2 * 1024 * 1024
 
 COMPONENT_CATEGORIES = (
     "demuxers",
@@ -333,7 +334,7 @@ def configure_args_for(profile, target, build_dir, deps, toolchain):
     args.append("--extra-cflags=" + " ".join(extra_cflags))
     args.append("--extra-ldflags=" + " ".join(extra_ldflags))
     if profile["artifact"] == "tools" and config["platform"] == "linux":
-        args.append("--extra-ldexeflags=-static-pie")
+        args.append(f"--extra-ldexeflags=-static-pie -Wl,-z,stack-size={MUSL_THREAD_STACK_BYTES}")
     args.extend(config.get("configure_flags", []))
     for category, names in requested.items():
         option = CONFIGURE_OPTION[category]
@@ -1119,6 +1120,14 @@ def macos_linked_libraries(binary):
     return [line.strip().split(" (", 1)[0] for line in lines if line.strip()]
 
 
+def gnu_stack_size(program_headers):
+    for line in program_headers.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "GNU_STACK":
+            return int(fields[5], 16)
+    return None
+
+
 def audit_tools(case, config, stage, version):
     bin_dir = stage / "bin"
     programs = sorted(path.name for path in bin_dir.iterdir()) if bin_dir.is_dir() else []
@@ -1149,9 +1158,18 @@ def audit_tools(case, config, stage, version):
             case(f"{name} is statically linked", "static-pie linked" in kind or "statically linked" in kind, kind)
             headers = output(["readelf", "-lW", str(binary)])
             case(f"{name} has no INTERP", "INTERP" not in headers)
+            stack = gnu_stack_size(headers)
+            case(
+                f"{name} thread stack is {MUSL_THREAD_STACK_BYTES} B",
+                stack == MUSL_THREAD_STACK_BYTES,
+                f"PT_GNU_STACK size {stack}",
+            )
             dynamic = output(["readelf", "-dW", str(binary)])
             case(f"{name} has no NEEDED", "(NEEDED)" not in dynamic, dynamic)
             case(f"{name} has no glibc symbol versions", b"GLIBC_" not in data)
+            encoders = output([str(binary), "-hide_banner", "-encoders"])
+            apple = [word for word in ("videotoolbox", "aac_at", "audiotoolbox") if word in encoders]
+            case(f"{name} has no Apple encoders", not apple, f"found: {apple}")
 
 
 def main():

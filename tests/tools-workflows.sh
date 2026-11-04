@@ -12,10 +12,10 @@ prefix=$(cd "$1" && pwd)
 fixtures=$(cd "${2:-$ROOT/.work/fixtures}" && pwd)
 ffmpeg=$prefix/bin/ffmpeg
 ffprobe=$prefix/bin/ffprobe
-work=$ROOT/.work/tmp/tools-workflows
+work=${TOOLS_WORK:-$ROOT/.work/tmp/tools-workflows}
 rm -rf "$work"
-mkdir -p "$work"
-export TMPDIR=$ROOT/.work/tmp
+mkdir -p "$work/tmp"
+export TMPDIR=$work/tmp
 cd "$work" || exit 1
 
 passed=0
@@ -59,7 +59,9 @@ if missing:
 }
 
 expect_tag() {
-    "$ffprobe" -v error -show_entries "format_tags=$2" -of default=nw=1:nk=1 "$1" | grep -qx "$3"
+    local value
+    value=$("$ffprobe" -v error -show_entries "format_tags=$2" -of default=nw=1:nk=1 "$1") || return
+    [ "$value" = "$3" ]
 }
 
 expect_chapters() {
@@ -94,7 +96,12 @@ PY
 }
 
 version_is() {
-    "$1" -hide_banner -version | head -1 | grep -q "^$2 version 9\.0\.2 "
+    local banner
+    banner=$("$1" -hide_banner -version) || return
+    case ${banner%%$'\n'*} in
+        "$2 version 9.0.2 "*) ;;
+        *) printf 'banner: %s\n' "${banner%%$'\n'*}"; return 1 ;;
+    esac
 }
 
 check "ffmpeg reports 9.0.2" version_is "$ffmpeg" ffmpeg

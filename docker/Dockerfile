@@ -15,4 +15,3 @@ WORKDIR /work
 
 FROM alpine-${TARGETARCH} AS runtime
 RUN apk add --no-cache bash file python3
-WORKDIR /work
