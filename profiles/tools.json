@@ -24,7 +24,10 @@
       "image2",
       "webvtt",
       "srt",
-      "ffmetadata"
+      "ffmetadata",
+      "lavfi",
+      "flac",
+      "wav"
     ],
     "decoders": [
       "h264",
@@ -48,7 +51,9 @@
       "wmav2",
       "png",
       "mjpeg",
-      "webp"
+      "webp",
+      "flac",
+      "pcm_s16le"
     ],
     "subtitle_decoders": [
       "subrip",
@@ -59,7 +64,10 @@
     "encoders": [
       "png",
       "subrip",
-      "mov_text"
+      "mov_text",
+      "flac",
+      "pcm_s16le",
+      "aac"
     ],
     "muxers": [
       "mp4",
@@ -68,7 +76,12 @@
       "webm",
       "mp3",
       "srt",
-      "image2"
+      "image2",
+      "flac",
+      "wav",
+      "ogg",
+      "matroska",
+      "ass"
     ],
     "parsers": [
       "h264",
@@ -80,7 +93,12 @@
     ],
     "filters": [
       "scale",
-      "aresample"
+      "aresample",
+      "bwdif",
+      "anullsrc",
+      "sine",
+      "testsrc2",
+      "cropdetect"
     ],
     "protocols": [
       "file",
