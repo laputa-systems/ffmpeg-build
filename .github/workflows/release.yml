@@ -328,9 +328,9 @@ jobs:
           cat > notes.md <<EOF
           FFmpeg ${upstream} built from pinned sources at ${GITHUB_SHA}.
 
-          - \`play-sdk\`: static playback SDK (headers, static libraries, relocatable pkg-config) for Player.
-          - \`tools\`: static, headless \`ffmpeg\` and \`ffprobe\` for local postprocessing. No network protocols or devices.
-          - \`runtime\`: \`ffmpeg\`, \`ffprobe\`, and the shared libav* libraries, headers, and pkg-config files they run on; the union of \`tools\` and \`play-sdk\`. No network protocols or devices.
+          - \`play-sdk\`: static playback SDK (headers, static libraries, relocatable pkg-config) for Player. LGPL v2.1 or later.
+          - \`tools\`: static, headless \`ffmpeg\` and \`ffprobe\` for local postprocessing. GPL v2 or later. No network protocols; lavfi is the only device.
+          - \`runtime\`: \`ffmpeg\`, \`ffprobe\`, and the shared libav* libraries, headers, and pkg-config files they run on; the union of \`tools\` and \`play-sdk\`. GPL v2 or later. No network protocols; lavfi is the only device.
 
           Targets: aarch64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl.
           Verify every archive against SHA256SUMS before use. release.json records the tag, commit, and asset digests.

@@ -38,7 +38,7 @@ check() {
     fi
 }
 
-modules=(libavformat libavcodec libavfilter libswscale libswresample libavutil)
+modules=(libavdevice libavformat libavcodec libavfilter libswscale libswresample libavutil)
 check "pkg-config finds the runtime" pkg-config --exists "${modules[@]}"
 check "headers are FFmpeg 9.0.2" grep -q '^#define FFMPEG_VERSION "9\.0\.2"$' "$prefix/include/libavutil/ffversion.h"
 
@@ -57,7 +57,7 @@ paths_in_prefix() {
                 ;;
             -l*)
                 case $flag in
-                    -lavformat|-lavcodec|-lavfilter|-lswscale|-lswresample|-lavutil) ;;
+                    -lavdevice|-lavformat|-lavcodec|-lavfilter|-lswscale|-lswresample|-lavutil) ;;
                     *) echo "unexpected library flag: $flag"; return 1 ;;
                 esac
                 ;;

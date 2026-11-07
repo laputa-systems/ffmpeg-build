@@ -1,8 +1,9 @@
 {
   "contract": 1,
   "profile": "runtime",
+  "license": "gpl",
   "artifact": "runtime",
-  "description": "Shared FFmpeg runtime: ffmpeg, ffprobe, and the libav* shared libraries, headers, and pkg-config files they run on. The union of tools and play-sdk. No devices, network protocols, or ffplay.",
+  "description": "Shared FFmpeg runtime: ffmpeg, ffprobe, and the libav* shared libraries, headers, and pkg-config files they run on. The union of tools and play-sdk. GPL. No network protocols or ffplay; the only device is the virtual lavfi input.",
   "sources": [
     "ffmpeg",
     "dav1d",
@@ -25,9 +26,11 @@
       "webvtt",
       "srt",
       "ffmetadata",
-      "lavfi",
       "flac",
       "wav"
+    ],
+    "indevs": [
+      "lavfi"
     ],
     "decoders": [
       "h264",

@@ -1,8 +1,9 @@
 {
   "contract": 1,
   "profile": "tools",
+  "license": "gpl",
   "artifact": "tools",
-  "description": "Headless ffmpeg and ffprobe pair for local postprocessing. No playback SDK, devices, network, or ffplay.",
+  "description": "Headless ffmpeg and ffprobe pair for local postprocessing. GPL. No playback SDK, network, or ffplay; the only device is the virtual lavfi input.",
   "sources": [
     "ffmpeg",
     "dav1d",
@@ -25,9 +26,11 @@
       "webvtt",
       "srt",
       "ffmetadata",
-      "lavfi",
       "flac",
       "wav"
+    ],
+    "indevs": [
+      "lavfi"
     ],
     "decoders": [
       "h264",

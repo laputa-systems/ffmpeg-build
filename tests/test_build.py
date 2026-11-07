@@ -228,8 +228,12 @@ class RuntimeProfileTests(unittest.TestCase):
             args = build.configure_args_for(
                 runtime, target, build.BUILD_ROOT / "b", build.BUILD_ROOT / "b" / "deps", {"sysroot": "/sdk"}
             )
-            for flag in ("--disable-network", "--disable-avdevice", "--enable-shared", "--disable-static"):
+            for flag in ("--disable-network", "--enable-shared", "--disable-static", "--enable-gpl"):
                 self.assertIn(flag, args)
+            self.assertIn("--enable-avdevice", args)
+            self.assertNotIn("--disable-avdevice", args)
+            self.assertLess(args.index("--disable-everything"), args.index("--enable-indev=lavfi"))
+            self.assertEqual([arg for arg in args if arg.startswith(("--enable-indev", "--enable-outdev"))], ["--enable-indev=lavfi"])
             self.assertNotIn("--enable-static", args)
             self.assertNotIn("--enable-ffplay", args)
             self.assertNotIn("--pkg-config-flags=--static", args)
@@ -265,6 +269,55 @@ class RuntimeProfileTests(unittest.TestCase):
         parsed = build.parse_archive_name("ffmpeg-9.0.2+20261107-aarch64-unknown-linux-musl-runtime.tar.gz")
         self.assertEqual(parsed["profile"], "runtime")
         self.assertEqual(parsed["target"], "aarch64-unknown-linux-musl")
+
+
+class LicenseAndDeviceTests(unittest.TestCase):
+    def test_profile_licenses(self):
+        expected = {"play-sdk": "lgpl", "tools": "gpl", "runtime": "gpl"}
+        for name, license_name in expected.items():
+            profile, _ = build.load_profile(name)
+            self.assertEqual(profile["license"], license_name)
+        self.assertEqual(build.FFMPEG_LICENSES["gpl"]["ffmpeg_license"], "GPL version 2 or later")
+        self.assertEqual(build.FFMPEG_LICENSES["lgpl"]["ffmpeg_license"], "LGPL version 2.1 or later")
+
+    def test_gpl_profiles_ship_the_gpl_text(self):
+        self.assertIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths("gpl"))
+        self.assertNotIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths("lgpl"))
+        self.assertIn("share/licenses/ffmpeg/COPYING.LGPLv2.1", build.notice_paths("lgpl"))
+
+    def test_play_sdk_stays_lgpl_without_devices(self):
+        sdk, _ = build.load_profile("play-sdk")
+        for target in sdk["targets"]:
+            args = build.configure_args_for(sdk, target, build.BUILD_ROOT / "b", build.BUILD_ROOT / "b" / "deps", {"sysroot": "/sdk"})
+            self.assertIn("--disable-avdevice", args)
+            self.assertNotIn("--enable-gpl", args)
+            self.assertFalse(any(arg.startswith("--enable-indev") for arg in args))
+
+    def test_tools_requests_lavfi_as_an_input_device(self):
+        tools, _ = build.load_profile("tools")
+        requested = build.requested_components(tools, "x86_64-unknown-linux-musl")
+        self.assertEqual(requested["indevs"], ["lavfi"])
+        self.assertNotIn("lavfi", requested["demuxers"])
+
+    def test_only_lavfi_input_device_may_be_requested(self):
+        profile = {"profile": "x", "components": {"indevs": ["lavfi", "v4l2"]}, "targets": {"t": {"platform": "linux", "arch": "x86_64"}}}
+        with self.assertRaises(SystemExit):
+            build.requested_components(profile, "t")
+
+    def test_license_problems(self):
+        self.assertEqual(build.license_problems("gpl", "CONFIG_GPL=yes\n!CONFIG_NONFREE=yes\n"), [])
+        self.assertEqual(build.license_problems("lgpl", "!CONFIG_GPL=yes\n"), [])
+        self.assertEqual(len(build.license_problems("lgpl", "CONFIG_GPL=yes\n")), 1)
+        self.assertEqual(len(build.license_problems("gpl", "!CONFIG_GPL=yes\n")), 1)
+        self.assertEqual(build.license_problems("gpl", "CONFIG_GPL=yes\nCONFIG_NONFREE=yes\nCONFIG_VERSION3=yes\n"), ["CONFIG_NONFREE=yes", "CONFIG_VERSION3=yes"])
+
+    def test_device_problems(self):
+        requested = {"indevs": ["lavfi"]}
+        self.assertEqual(build.device_problems(requested, {"indevs": ["lavfi"]}), [])
+        self.assertEqual(build.device_problems(requested, {"indevs": ["lavfi", "v4l2"]}), ["v4l2"])
+        self.assertEqual(build.device_problems({}, {"indevs": ["lavfi"]}), ["lavfi"])
+        problems = build.component_problems(requested, {"indevs": ["lavfi"], "outdevs": ["sdl2"]})
+        self.assertEqual(problems, ["outdevs enabled: ['sdl2']"])
 
 
 class SymlinkTests(unittest.TestCase):
@@ -587,18 +640,21 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertEqual(len(build.archive_member_problems([real, hardlink], "root")), 1)
 
     def test_runtime_stage_complete_needs_development_links(self):
-        for relative in build.notice_paths():
+        for relative in build.notice_paths("gpl"):
             self.write(relative)
         for relative in ("bin/ffmpeg", "bin/ffprobe", "include/libavutil/ffversion.h", "share/ffmpeg-build/manifest.json"):
             self.write(relative)
         for library in build.RUNTIME_LIBRARIES:
             self.write(f"lib/pkgconfig/{library}.pc")
             self.write(f"lib/{library}.so.1.0.0")
-        self.assertFalse(build.stage_complete(self.stage, "runtime", "linux"))
+        runtime, _ = build.load_profile("runtime")
+        self.assertFalse(build.stage_complete(self.stage, runtime, "linux"))
         for library in build.RUNTIME_LIBRARIES:
             self.link(f"lib/{library}.so", f"{library}.so.1.0.0")
-        self.assertTrue(build.stage_complete(self.stage, "runtime", "linux"))
-        self.assertFalse(build.stage_complete(self.stage, "runtime", "macos"))
+        self.assertTrue(build.stage_complete(self.stage, runtime, "linux"))
+        self.assertFalse(build.stage_complete(self.stage, runtime, "macos"))
+        (self.stage / "share/licenses/ffmpeg/COPYING.GPLv2").unlink()
+        self.assertFalse(build.stage_complete(self.stage, runtime, "linux"))
 
     def test_extracted_library_problems(self):
         real = self.write("lib/libavcodec.so.63.4.100", b"elf")

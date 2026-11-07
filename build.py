@@ -26,12 +26,23 @@ TMP_ROOT = WORK / "tmp"
 INSTALL_PREFIX = "/opt/ffmpeg-build"
 MUSL_THREAD_STACK_BYTES = 2 * 1024 * 1024
 DIST = ROOT / "dist"
-LICENSE_FILES = {
-    "ffmpeg": ("LICENSE.md", "COPYING.LGPLv2.1", "CREDITS"),
+FFMPEG_LICENSES = {
+    "lgpl": {
+        "configure_flags": (),
+        "ffmpeg_license": "LGPL version 2.1 or later",
+        "ffmpeg_files": ("LICENSE.md", "COPYING.LGPLv2.1", "CREDITS"),
+    },
+    "gpl": {
+        "configure_flags": ("--enable-gpl",),
+        "ffmpeg_license": "GPL version 2 or later",
+        "ffmpeg_files": ("LICENSE.md", "COPYING.GPLv2", "COPYING.LGPLv2.1", "CREDITS"),
+    },
+}
+DEPENDENCY_LICENSE_FILES = {
     "dav1d": ("COPYING",),
     "zlib": ("LICENSE",),
 }
-FFMPEG_LICENSE = "LGPL version 2.1 or later"
+ALLOWED_INDEVS = ("lavfi",)
 RELEASE_TAG = re.compile(r"(?:local|[0-9]{8}(?:-r[0-9]+)?)\Z")
 ARCHIVE_NAME = re.compile(
     r"ffmpeg-(?P<upstream>[0-9]+(?:\.[0-9]+)*)\+(?P<tag>local|[0-9]{8}(?:-r[0-9]+)?)"
@@ -67,6 +78,7 @@ COMPONENT_CATEGORIES = (
     "filters",
     "hwaccels",
     "protocols",
+    "indevs",
     "devices",
 )
 
@@ -81,6 +93,7 @@ CONFIGURE_OPTION = {
     "filters": "--enable-filter",
     "hwaccels": "--enable-hwaccel",
     "protocols": "--enable-protocol",
+    "indevs": "--enable-indev",
 }
 
 COMPONENT_ALIASES = {
@@ -197,7 +210,7 @@ def load_sources():
 
 ARTIFACTS = ("sdk", "tools", "runtime")
 TOOLS_PROGRAMS = ("ffmpeg", "ffprobe")
-RUNTIME_LIBRARIES = ("libavcodec", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
+RUNTIME_LIBRARIES = ("libavcodec", "libavdevice", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
 SYSTEM_LIBRARY_SONAMES = {
     "libva": "libva.so.2",
     "libva-drm": "libva-drm.so.2",
@@ -220,6 +233,8 @@ def load_profile(name):
         fail(f"{path} does not declare profile {name}")
     if profile.get("artifact") not in ARTIFACTS:
         fail(f"{path} artifact must be one of {ARTIFACTS}")
+    if profile.get("license") not in FFMPEG_LICENSES:
+        fail(f"{path} license must be one of {sorted(FFMPEG_LICENSES)}")
     targets = profile.get("targets")
     if not isinstance(targets, dict) or not targets:
         fail(f"{path} has no target scope")
@@ -265,6 +280,9 @@ def requested_components(profile, target):
     merged = merged_components(profile, target)
     if merged.get("devices"):
         fail("producer profiles cannot request devices")
+    disallowed = sorted(set(merged.get("indevs", [])) - set(ALLOWED_INDEVS))
+    if disallowed:
+        fail(f"producer profiles may request only the {ALLOWED_INDEVS} input devices, not {disallowed}")
     requested = {}
     for category in COMPONENT_CATEGORIES:
         if category == "subtitle_decoders":
@@ -358,7 +376,8 @@ def configure_args_for(profile, target, build_dir, deps, toolchain):
         *programs,
         "--disable-doc",
         "--disable-network",
-        "--disable-avdevice",
+        *avdevice_args(requested),
+        *FFMPEG_LICENSES[profile["license"]]["configure_flags"],
         "--disable-autodetect",
         "--disable-everything",
         "--enable-libdav1d",
@@ -393,6 +412,10 @@ def configure_args_for(profile, target, build_dir, deps, toolchain):
         for name in names:
             args.append(f"{option}={configure_component(category, name)}")
     return args
+
+
+def avdevice_args(requested):
+    return ["--enable-avdevice"] if requested.get("indevs") else ["--disable-avdevice"]
 
 
 def runtime_link_args(platform_name):
@@ -602,8 +625,8 @@ def parse_components(build_dir):
         "ENCODER": "encoders",
         "MUXER": "muxers",
         "DEVICE": "devices",
-        "INDEV": "devices",
-        "OUTDEV": "devices",
+        "INDEV": "indevs",
+        "OUTDEV": "outdevs",
     }
     pattern = re.compile(
         r"^#define CONFIG_(\w+)_(DECODER|DEMUXER|PARSER|BSF|FILTER|HWACCEL|"
@@ -659,12 +682,18 @@ def auto_selected(requested, resolved):
     return selected
 
 
+def device_problems(requested, resolved):
+    allowed = set(requested.get("indevs", [])) & set(ALLOWED_INDEVS)
+    return sorted(set(resolved.get("indevs", [])) - allowed)
+
+
 def component_problems(requested, resolved):
     problems = []
-    for category in ("encoders", "muxers", "devices"):
+    for category in ("encoders", "muxers", "devices", "outdevs"):
         names = set(resolved.get(category, []))
         if names:
             problems.append(f"{category} enabled: {sorted(names)}")
+    problems.extend(f"input device enabled: {name}" for name in device_problems(requested, resolved))
     protocols = set(resolved.get("protocols", []))
     allowed = set(requested.get("protocols", []))
     extra = protocols - allowed
@@ -720,9 +749,13 @@ def sign_libraries(config, stage):
             run(["codesign", "--force", "--sign", "-", str(path)])
 
 
-def notice_paths():
+def license_files(license_name):
+    return {"ffmpeg": FFMPEG_LICENSES[license_name]["ffmpeg_files"], **DEPENDENCY_LICENSE_FILES}
+
+
+def notice_paths(license_name):
     paths = ["README"]
-    for name, files in LICENSE_FILES.items():
+    for name, files in license_files(license_name).items():
         paths.extend(f"share/licenses/{name}/{filename}" for filename in files)
     return paths
 
@@ -731,8 +764,9 @@ def development_link(library, platform_name):
     return f"lib/{library}.dylib" if platform_name == "macos" else f"lib/{library}.so"
 
 
-def stage_complete(stage, artifact, platform_name):
-    if not all((stage / path).is_file() for path in notice_paths()):
+def stage_complete(stage, profile, platform_name):
+    artifact = profile["artifact"]
+    if not all((stage / path).is_file() for path in notice_paths(profile["license"])):
         return False
     if artifact == "tools":
         required = (*(f"bin/{name}" for name in TOOLS_PROGRAMS), "share/ffmpeg-build/manifest.json")
@@ -841,7 +875,7 @@ def parse_license(ffmpeg_build):
 
 
 def install_notices(profile, target, sources, stage):
-    for name, files in LICENSE_FILES.items():
+    for name, files in license_files(profile["license"]).items():
         destination = stage / "share" / "licenses" / name
         destination.mkdir(parents=True, exist_ok=True)
         for filename in files:
@@ -854,14 +888,14 @@ def install_notices(profile, target, sources, stage):
         )
     elif profile["artifact"] == "runtime":
         contents = (
-            "bin/ffmpeg, bin/ffprobe   headless; no network protocols or devices; load lib/ relative to bin/\n"
-            "lib/                shared libavcodec, libavformat, libavfilter, libavutil, libswresample, libswscale\n"
+            "bin/ffmpeg, bin/ffprobe   headless; no network protocols; lavfi is the only device; load lib/ relative to bin/\n"
+            "lib/                shared libavcodec, libavdevice, libavformat, libavfilter, libavutil, libswresample, libswscale\n"
             "                    with dav1d and zlib linked in; keep the version symlinks\n"
             "include/            FFmpeg headers\n"
             "lib/pkgconfig/      relocatable pkg-config files for shared linking (prefix=${pcfiledir}/../..)\n"
         )
     else:
-        contents = "bin/ffmpeg, bin/ffprobe   static, headless; no network protocols or devices\n"
+        contents = "bin/ffmpeg, bin/ffprobe   static, headless; no network protocols; lavfi is the only device\n"
     (stage / "README").write_text(
         f"FFmpeg {profile['profile']} for {target}\n"
         "Built by https://github.com/laputa-systems/ffmpeg-build from pinned upstream sources.\n\n"
@@ -889,7 +923,7 @@ def build(target, profile_name):
     args = configure_args_for(profile, target, build_dir, deps, toolchain)
     fingerprint = build_fingerprint(profile_path, target, profile_name, args, toolchain)
     stamp_path = build_dir / "stamp.json"
-    if stamp_path.is_file() and stage_complete(stage, artifact, config["platform"]):
+    if stamp_path.is_file() and stage_complete(stage, profile, config["platform"]):
         stamp = read_json(stamp_path)
         if stamp.get("fingerprint") == fingerprint:
             print(f"up to date: {stage}")
@@ -946,7 +980,7 @@ def build(target, profile_name):
         drop_static_link_flags(stage)
     manifest = manifest_for(profile, target, ffmpeg_build, stage, args, toolchain)
     write_manifest(stage, manifest)
-    if not stage_complete(stage, artifact, config["platform"]):
+    if not stage_complete(stage, profile, config["platform"]):
         fail(f"stage is incomplete after build: {stage}")
     stamp = {
         "fingerprint": fingerprint,
@@ -1067,7 +1101,15 @@ def audit(target, profile_name):
     external_libraries = parse_external_libraries(config_mak)
     selected = auto_selected(requested, resolved)
 
-    case("no devices", not resolved.get("devices"), f"devices: {resolved.get('devices')}")
+    devices = sorted(set(resolved.get("devices", [])) | set(resolved.get("outdevs", [])))
+    case("no devices or output devices", not devices, f"devices: {devices}")
+    extra_indevs = device_problems(requested, resolved)
+    case(f"input devices limited to {list(ALLOWED_INDEVS)}", not extra_indevs, f"indevs: {extra_indevs}")
+    case(
+        "libavdevice only for requested input devices",
+        ("--enable-avdevice" in configuration) == bool(requested.get("indevs")),
+        f"indevs requested: {requested.get('indevs')}",
+    )
     if artifact == "sdk":
         for category in ("encoders", "muxers"):
             names = resolved.get(category, [])
@@ -1154,7 +1196,8 @@ def audit(target, profile_name):
             )
         case("manifest configure arguments", manifest.get("configure_args") == args)
         case("manifest effective configure", manifest.get("configure") == configuration)
-        case("manifest license", manifest.get("license") == FFMPEG_LICENSE, f"license: {manifest.get('license')!r}")
+        expected_license = FFMPEG_LICENSES[profile["license"]]["ffmpeg_license"]
+        case(f"manifest license is {expected_license}", manifest.get("license") == expected_license, f"license: {manifest.get('license')!r}")
 
     case(
         "external libraries allowed",
@@ -1170,9 +1213,10 @@ def audit(target, profile_name):
     if config["platform"] == "linux":
         audit_linux_config(case, config, ffmpeg_build, config_mak)
 
-    missing_notices = [path for path in notice_paths() if not (stage / path).is_file()]
+    missing_notices = [path for path in notice_paths(profile["license"]) if not (stage / path).is_file()]
     case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
-    case("no GPL or nonfree code", not re.search(r"^CONFIG_(?:GPL|NONFREE|VERSION3)=yes$", config_mak, re.M))
+    problems = license_problems(profile["license"], config_mak)
+    case(f"FFmpeg license flags match {profile['license']}", not problems, "; ".join(problems))
 
     leaked = build_prefix_leaks(stage)
     case("no absolute build prefix in artifact", not leaked, f"files: {leaked[:10]}")
@@ -1185,6 +1229,14 @@ def audit(target, profile_name):
     else:
         audit_tools(case, config, stage, version)
     return check.finish()
+
+
+def license_problems(license_name, config_mak):
+    enabled = set(re.findall(r"^CONFIG_(GPL|NONFREE|VERSION3)=yes$", config_mak, re.M))
+    problems = [f"CONFIG_{name}=yes" for name in sorted(enabled & {"NONFREE", "VERSION3"})]
+    if ("GPL" in enabled) != (license_name == "gpl"):
+        problems.append(f"CONFIG_GPL is {'yes' if 'GPL' in enabled else 'off'} for a {license_name} profile")
+    return problems
 
 
 def build_prefix_leaks(stage):
@@ -1658,6 +1710,7 @@ def audit_runtime(case, config, stage, version, requested, resolved, manifest):
 
     headers = (
         "include/libavcodec/avcodec.h",
+        "include/libavdevice/avdevice.h",
         "include/libavformat/avformat.h",
         "include/libavfilter/avfilter.h",
         "include/libavutil/avutil.h",
@@ -1673,12 +1726,12 @@ def audit_runtime(case, config, stage, version, requested, resolved, manifest):
     symlinks = symlink_problems(links, set(files))
     case("symlinks are relative, inside lib/, and resolve", not symlinks, "; ".join(symlinks[:5]))
     layout, layout_problems = library_layout(set(files), links, platform_name)
-    case("lib/ holds exactly the six libav* libraries and their links", not layout_problems, "; ".join(layout_problems))
+    case("lib/ holds exactly the seven FFmpeg libraries and their links", not layout_problems, "; ".join(layout_problems))
 
     pc_dir = stage / "lib" / "pkgconfig"
     pc_names = sorted(path.name for path in pc_dir.glob("*.pc")) if pc_dir.is_dir() else []
     case(
-        "pkg-config files are the six libraries",
+        "pkg-config files are the seven libraries",
         pc_names == sorted(f"{library}.pc" for library in RUNTIME_LIBRARIES),
         f"found: {pc_names}",
     )
@@ -1845,7 +1898,7 @@ def package(target, profile_name, tag):
     profile, _ = load_profile(profile_name)
     config = target_config(profile, target)
     stage, _, _ = build_paths(profile_name, target)
-    if not stage_complete(stage, profile["artifact"], config["platform"]):
+    if not stage_complete(stage, profile, config["platform"]):
         fail(f"stage {stage} is incomplete; run build first")
     manifest = json.loads((stage / "share" / "ffmpeg-build" / "manifest.json").read_text())
     version = lock["sources"]["ffmpeg"]["version"]
@@ -1979,7 +2032,7 @@ def qualify(archive_path):
         "manifest release matches name",
         manifest.get("release") == {"tag": tag, "archive": archive_path.name},
     )
-    missing_notices = [path for path in notice_paths() if not (prefix / path).is_file()]
+    missing_notices = [path for path in notice_paths(profile["license"]) if not (prefix / path).is_file()]
     case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
     leaked = sorted(
         str(path.relative_to(prefix))
