@@ -15,6 +15,7 @@ ffprobe=$prefix/bin/ffprobe
 work=${TOOLS_WORK:-$ROOT/.work/tmp/tools-workflows}
 rm -rf "$work"
 mkdir -p "$work/tmp"
+work=$(cd "$work" && pwd)
 export TMPDIR=$work/tmp
 cd "$work" || exit 1
 
