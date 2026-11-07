@@ -59,10 +59,18 @@ done:
     return status;
 }
 
+static int protocol_allowed(const char *protocol, int count, char **allowed)
+{
+    for (int i = 0; i < count; i++)
+        if (strcmp(protocol, allowed[i]) == 0)
+            return 1;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s <h264.mp4> <av1.mp4>\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "usage: %s <h264.mp4> <av1.mp4> <allowed-protocol>...\n", argv[0]);
         return 2;
     }
     printf("libavutil %s\n", av_version_info());
@@ -73,7 +81,7 @@ int main(int argc, char **argv)
     void *opaque = NULL;
     const char *protocol;
     while ((protocol = avio_enum_protocols(&opaque, 0))) {
-        if (strcmp(protocol, "file") != 0) {
+        if (!protocol_allowed(protocol, argc - 3, argv + 3)) {
             fprintf(stderr, "unexpected input protocol %s\n", protocol);
             return 1;
         }

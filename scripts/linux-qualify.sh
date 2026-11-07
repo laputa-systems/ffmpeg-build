@@ -19,7 +19,7 @@ case $name in
     *) printf 'error: %s is not a Linux musl archive\n' "$name" >&2; exit 2 ;;
 esac
 case $name in
-    *-play-sdk.tar.gz) image=build ;;
+    *-play-sdk.tar.gz|*-runtime.tar.gz) image=build ;;
     *-tools.tar.gz) image=runtime ;;
     *) printf 'error: unknown profile in %s\n' "$name" >&2; exit 2 ;;
 esac

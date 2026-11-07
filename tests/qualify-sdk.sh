@@ -67,7 +67,7 @@ link_consumer() {
     cc -o "$work/sdk-consumer" "$ROOT/tests/sdk-consumer.c" "$@"
 }
 check "external consumer links with pkg-config --static" link_consumer
-check "consumer decodes h264 and AV1 (libdav1d)" "$work/sdk-consumer" "$fixtures/video-h264.mp4" "$fixtures/video-av1.mp4"
+check "consumer decodes h264 and AV1 (libdav1d)" "$work/sdk-consumer" "$fixtures/video-h264.mp4" "$fixtures/video-av1.mp4" file
 
 system_only() {
     case $target in

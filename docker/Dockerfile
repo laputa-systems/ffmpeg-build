@@ -15,3 +15,6 @@ WORKDIR /work
 
 FROM alpine-${TARGETARCH} AS runtime
 RUN apk add --no-cache bash file python3
+
+FROM runtime AS runtime-libva
+RUN apk add --no-cache libva
