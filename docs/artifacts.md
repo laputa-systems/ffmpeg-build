@@ -26,9 +26,9 @@ include/                          FFmpeg headers only
 lib/libavcodec.so.63.1.102        SONAME libavcodec.so.63, RUNPATH $ORIGIN
 lib/libavcodec.so.63 -> libavcodec.so.63.1.102
 lib/libavcodec.so    -> libavcodec.so.63.1.102
-                                  likewise libavformat (63), libavfilter (12), libavutil (61),
-                                  libswresample (7), libswscale (10)
-lib/pkgconfig/*.pc                the six libraries; prefix=${pcfiledir}/../..; empty Libs.private
+                                  likewise libavdevice (63), libavformat (63), libavfilter (12),
+                                  libavutil (61), libswresample (7), libswscale (10)
+lib/pkgconfig/*.pc                the seven libraries; prefix=${pcfiledir}/../..; empty Libs.private
 share/ffmpeg-build/manifest.json
 share/licenses/{ffmpeg,dav1d,zlib}/
 README
@@ -57,6 +57,8 @@ share/licenses/{ffmpeg,dav1d,zlib}/
 README
 ```
 
+`share/licenses/ffmpeg/` holds `LICENSE.md`, `CREDITS`, and `COPYING.LGPLv2.1`, plus `COPYING.GPLv2` for the GPL `runtime` and `tools` profiles.
+
 SDK archives keep their symbols. Tools and runtime executables and runtime libraries are stripped, and on macOS ad-hoc signed after stripping. Today `usr` installs only the tools archive and never installs headers or libraries; consumers move to `runtime` separately.
 
 ## Manifest
@@ -71,16 +73,16 @@ SDK archives keep their symbols. Tools and runtime executables and runtime libra
 | `sources` | version, URL, and SHA-256 of FFmpeg, dav1d, and zlib |
 | `producer` | repository and commit |
 | `configure_args`, `configure` | requested arguments and FFmpeg's recorded configuration |
-| `components` | every resolved component by category |
+| `components` | every resolved component by category; input and output devices are `indevs` and `outdevs`, and `lavfi` is the only one ever enabled |
 | `requested_components`, `auto_selected` | the profile's request, and what configure added |
 | `external_libraries` | FFmpeg `CONFIG_LIB*` libraries (`dav1d`) |
 | `bundled_dependencies` | static libraries shipped or linked in (`dav1d`, `zlib`) |
 | `frameworks`, `system_libraries` | what a consumer links from the system |
 | `toolchain` | `cc`, SDK and sysroot, deployment target, CPU baseline, host, and musl version |
-| `license` | `LGPL version 2.1 or later` |
+| `license` | FFmpeg's `FFMPEG_LICENSE`, set by the profile's `license` key: `GPL version 2 or later` for `runtime` and `tools`, `LGPL version 2.1 or later` for `play-sdk` |
 | `libraries` | `runtime` only; see below |
 
-`libraries` maps each of `libavcodec`, `libavfilter`, `libavformat`, `libavutil`, `libswresample`, and `libswscale` to:
+`libraries` maps each of `libavcodec`, `libavdevice`, `libavfilter`, `libavformat`, `libavutil`, `libswresample`, and `libswscale` to:
 
 | Key | Meaning |
 | --- | --- |

@@ -72,7 +72,7 @@ Player `v0.42.1` is the first Player release linked against this SDK. `usr` inst
 
 Supported `tools` workflows: ffprobe JSON; yt-dlp merge of h264/hevc/vp9/av1 video with aac/opus audio into mp4; `--convert-subs srt`; `--embed-metadata` with chapters; `--embed-thumbnail` (webp to png, png/jpeg as `attached_pic`); m4a/webm/mp3 metadata; mkv/ts remux to mp4 with `mov_text`; and on macOS the `encode` HEVC (`hevc_videotoolbox`) + AAC (`aac_at`) + `mov_text` command.
 
-Intentional limitations: no network protocols (yt-dlp downloads), no devices, no `ffplay`, no encoders beyond PNG, SubRip, `mov_text`, and the two macOS AudioToolbox/VideoToolbox encoders; Linux has no HEVC encoder, so `encode` is macOS-only. x86-64 Linux is built and qualified only on GitHub's native runners.
+Intentional limitations: no network protocols (yt-dlp downloads), no devices beyond the virtual `lavfi` input, no `ffplay`, no encoders beyond PNG, SubRip, `mov_text`, and the two macOS AudioToolbox/VideoToolbox encoders; Linux has no HEVC encoder, so `encode` is macOS-only. x86-64 Linux is built and qualified only on GitHub's native runners.
 
 ## Guarantees added after `20261104`
 
