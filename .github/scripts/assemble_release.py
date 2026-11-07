@@ -8,7 +8,7 @@ import tarfile
 from pathlib import Path
 
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
-PROFILES = ("play-sdk", "tools")
+PROFILES = ("play-sdk", "tools", "runtime")
 
 
 def expected_assets(upstream: str, tag: str) -> list[str]:
