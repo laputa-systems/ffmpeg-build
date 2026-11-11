@@ -36,7 +36,7 @@ in_container() {
         -e GIT_CONFIG_COUNT=1 \
         -e GIT_CONFIG_KEY_0=safe.directory \
         -e GIT_CONFIG_VALUE_0=/work \
-        -v "$ROOT:/work" "${git_mounts[@]}" -w /work \
+        -v "$ROOT:/work" ${git_mounts[@]+"${git_mounts[@]}"} -w /work \
         "$image" "$@"
 }
 

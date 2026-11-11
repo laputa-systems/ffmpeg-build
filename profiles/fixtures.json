@@ -1,0 +1,143 @@
+{
+  "contract": 1,
+  "profile": "fixtures",
+  "license": "gpl",
+  "artifact": "tools",
+  "test_only": true,
+  "description": "Test-only static ffmpeg/ffprobe pair for Play's fixture generator on x86_64 Linux. GPL. Not a runtime; released only for generating test data: it carries libx264, libx265, libsvtav1, libvpx, libmp3lame, and libopus so tests/fixtures/gen.sh can be produced without a host FFmpeg.",
+  "sources": [
+    "ffmpeg",
+    "zlib",
+    "x264",
+    "x265",
+    "svtav1",
+    "vpx",
+    "lame",
+    "opus"
+  ],
+  "components": {
+    "demuxers": [
+      "mov",
+      "matroska",
+      "avi",
+      "mp3",
+      "ogg",
+      "flac",
+      "wav",
+      "image2",
+      "concat",
+      "ffmetadata",
+      "webvtt",
+      "srt",
+      "ass"
+    ],
+    "indevs": [
+      "lavfi"
+    ],
+    "decoders": [
+      "png",
+      "mjpeg",
+      "subrip",
+      "ass",
+      "webvtt",
+      "wrapped_avframe",
+      "pcm_s16le"
+    ],
+    "encoders": [
+      "libx264",
+      "libx265",
+      "libsvtav1",
+      "libvpx_vp9",
+      "libmp3lame",
+      "libopus",
+      "aac",
+      "flac",
+      "alac",
+      "pcm_s16le",
+      "mjpeg",
+      "png",
+      "mpeg4",
+      "h263",
+      "ffv1",
+      "subrip",
+      "srt",
+      "mov_text",
+      "webvtt"
+    ],
+    "muxers": [
+      "mp4",
+      "mov",
+      "matroska",
+      "webm",
+      "avi",
+      "flac",
+      "mp3",
+      "wav",
+      "ogg",
+      "ipod",
+      "image2"
+    ],
+    "parsers": [
+      "h264",
+      "hevc",
+      "av1",
+      "vp9",
+      "mpeg4video",
+      "aac",
+      "mpegaudio",
+      "opus",
+      "vorbis",
+      "flac"
+    ],
+    "bsfs": [
+      "h264_mp4toannexb",
+      "hevc_mp4toannexb",
+      "vp9_superframe",
+      "aac_adtstoasc",
+      "extract_extradata",
+      "null"
+    ],
+    "filters": [
+      "testsrc2",
+      "sine",
+      "color",
+      "format",
+      "scale",
+      "aformat",
+      "aresample",
+      "null",
+      "anull"
+    ],
+    "protocols": [
+      "file"
+    ]
+  },
+  "targets": {
+    "x86_64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "x86_64",
+      "cpu_baseline": "x86-64",
+      "configure_flags": [],
+      "components": {},
+      "frameworks": [],
+      "system_libraries": [],
+      "external_libraries": [
+        "x264",
+        "x265",
+        "svtav1",
+        "vpx",
+        "mp3lame",
+        "opus"
+      ],
+      "bundled_dependencies": [
+        "zlib",
+        "x264",
+        "x265",
+        "svtav1",
+        "vpx",
+        "lame",
+        "opus"
+      ]
+    }
+  }
+}

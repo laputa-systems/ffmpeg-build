@@ -273,7 +273,7 @@ class RuntimeProfileTests(unittest.TestCase):
 
 class LicenseAndDeviceTests(unittest.TestCase):
     def test_profile_licenses(self):
-        expected = {"play-sdk": "lgpl", "tools": "gpl", "runtime": "gpl"}
+        expected = {"play-sdk": "lgpl", "tools": "gpl", "runtime": "gpl", "fixtures": "gpl"}
         for name, license_name in expected.items():
             profile, _ = build.load_profile(name)
             self.assertEqual(profile["license"], license_name)
@@ -281,9 +281,11 @@ class LicenseAndDeviceTests(unittest.TestCase):
         self.assertEqual(build.FFMPEG_LICENSES["lgpl"]["ffmpeg_license"], "LGPL version 2.1 or later")
 
     def test_gpl_profiles_ship_the_gpl_text(self):
-        self.assertIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths("gpl"))
-        self.assertNotIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths("lgpl"))
-        self.assertIn("share/licenses/ffmpeg/COPYING.LGPLv2.1", build.notice_paths("lgpl"))
+        tools, _ = build.load_profile("tools")
+        sdk, _ = build.load_profile("play-sdk")
+        self.assertIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths(tools))
+        self.assertNotIn("share/licenses/ffmpeg/COPYING.GPLv2", build.notice_paths(sdk))
+        self.assertIn("share/licenses/ffmpeg/COPYING.LGPLv2.1", build.notice_paths(sdk))
 
     def test_play_sdk_stays_lgpl_without_devices(self):
         sdk, _ = build.load_profile("play-sdk")
@@ -318,6 +320,101 @@ class LicenseAndDeviceTests(unittest.TestCase):
         self.assertEqual(build.device_problems({}, {"indevs": ["lavfi"]}), ["lavfi"])
         problems = build.component_problems(requested, {"indevs": ["lavfi"], "outdevs": ["sdl2"]})
         self.assertEqual(problems, ["outdevs enabled: ['sdl2']"])
+
+
+class FixturesProfileTests(unittest.TestCase):
+    def test_profile_is_gpl_test_only_tools(self):
+        profile, _ = build.load_profile("fixtures")
+        self.assertEqual(profile["license"], "gpl")
+        self.assertEqual(profile["artifact"], "tools")
+        self.assertTrue(profile["test_only"])
+        for source in ("zlib", "x264", "x265", "svtav1", "vpx", "lame", "opus"):
+            self.assertIn(source, profile["sources"])
+
+    def test_profile_is_linux_x86_64_only(self):
+        profile, _ = build.load_profile("fixtures")
+        self.assertEqual(list(profile["targets"]), ["x86_64-unknown-linux-musl"])
+        self.assertEqual(build.profile_target_problems(profile), [])
+        with self.assertRaises(SystemExit):
+            build.configure_args_for(
+                profile, "aarch64-apple-darwin", build.BUILD_ROOT / "b", build.BUILD_ROOT / "b" / "deps", {}
+            )
+
+    def test_test_only_profile_rules(self):
+        macos = {
+            "test_only": True,
+            "artifact": "tools",
+            "targets": {"aarch64-apple-darwin": {"platform": "macos"}},
+        }
+        self.assertEqual(
+            build.profile_target_problems(macos),
+            ["a test-only profile builds only Linux targets, not ['aarch64-apple-darwin']"],
+        )
+        runtime = {
+            "test_only": True,
+            "artifact": "runtime",
+            "targets": {"x86_64-unknown-linux-musl": {"platform": "linux"}},
+        }
+        self.assertEqual(
+            build.profile_target_problems(runtime),
+            ["a test-only profile must use the tools artifact"],
+        )
+        self.assertEqual(
+            build.profile_target_problems(
+                {
+                    "test_only": False,
+                    "artifact": "runtime",
+                    "targets": {"aarch64-apple-darwin": {"platform": "macos"}},
+                }
+            ),
+            [],
+        )
+
+    def test_configure_enables_the_fixture_encoders(self):
+        profile, _ = build.load_profile("fixtures")
+        args = build.configure_args_for(
+            profile,
+            "x86_64-unknown-linux-musl",
+            build.BUILD_ROOT / "b",
+            build.BUILD_ROOT / "b" / "deps",
+            {},
+        )
+        for flag in (
+            "--enable-libx264",
+            "--enable-libx265",
+            "--enable-libsvtav1",
+            "--enable-libvpx",
+            "--enable-libmp3lame",
+            "--enable-libopus",
+            "--enable-gpl",
+            "--enable-indev=lavfi",
+            "--disable-network",
+        ):
+            self.assertIn(flag, args)
+        self.assertNotIn("--enable-libdav1d", args)
+        self.assertNotIn("--enable-shared", args)
+        self.assertIn("--disable-shared", args)
+
+    def test_notices_cover_every_dependency(self):
+        profile, _ = build.load_profile("fixtures")
+        notices = build.notice_paths(profile)
+        for relative in (
+            "share/licenses/ffmpeg/COPYING.GPLv2",
+            "share/licenses/zlib/LICENSE",
+            "share/licenses/x264/COPYING",
+            "share/licenses/x265/COPYING",
+            "share/licenses/svtav1/LICENSE.md",
+            "share/licenses/vpx/LICENSE",
+            "share/licenses/lame/COPYING",
+            "share/licenses/opus/COPYING",
+        ):
+            self.assertIn(relative, notices)
+
+    def test_fixtures_archive_is_named_for_its_profile(self):
+        self.assertEqual(
+            build.archive_name("9.0.2", "20261111", "x86_64-unknown-linux-musl", "fixtures"),
+            "ffmpeg-9.0.2+20261111-x86_64-unknown-linux-musl-fixtures",
+        )
 
 
 class SymlinkTests(unittest.TestCase):
@@ -640,7 +737,8 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertEqual(len(build.archive_member_problems([real, hardlink], "root")), 1)
 
     def test_runtime_stage_complete_needs_development_links(self):
-        for relative in build.notice_paths("gpl"):
+        runtime, _ = build.load_profile("runtime")
+        for relative in build.notice_paths(runtime):
             self.write(relative)
         for relative in ("bin/ffmpeg", "bin/ffprobe", "include/libavutil/ffversion.h", "share/ffmpeg-build/manifest.json"):
             self.write(relative)
@@ -673,6 +771,33 @@ class RuntimeStageTests(unittest.TestCase):
         problems = build.extracted_library_problems(self.stage, libraries, "linux")
         self.assertEqual(len(problems), 2, problems)
 
+
+class StaticPkgConfigTests(unittest.TestCase):
+    def test_x265_pc_loses_only_the_shared_libgcc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = pathlib.Path(tmp) / "x265.pc"
+            pc.write_text(
+                "Libs: -L${libdir} -lx265\n"
+                "Libs.private: -lstdc++ -lm -lssp_nonshared -lgcc_s -lgcc -lgcc_s -lgcc -lrt -ldl\n"
+            )
+            build.drop_shared_libgcc(pc)
+            self.assertEqual(
+                pc.read_text(),
+                "Libs: -L${libdir} -lx265\n"
+                "Libs.private: -lstdc++ -lm -lssp_nonshared -lgcc -lgcc -lrt -ldl\n",
+            )
+
+
+    def test_vpx_pc_points_at_the_real_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = pathlib.Path(tmp) / "vpx.pc"
+            pc.write_text("prefix=/opt/ffmpeg-build\nexec_prefix=${prefix}\nLibs: -L${libdir} -lvpx -lm\n")
+            build.set_pc_prefix(pc, pathlib.Path("/deps"))
+            self.assertEqual(pc.read_text(), "prefix=/deps\nexec_prefix=${prefix}\nLibs: -L${libdir} -lvpx -lm\n")
+
+    def test_feature_flags_are_not_external_libraries(self):
+        config_mak = "CONFIG_LIBX264=yes\nCONFIG_LIBX264_HDR10=yes\nCONFIG_LIBX264_ENCODER=yes\n"
+        self.assertEqual(build.parse_external_libraries(config_mak), ["x264"])
 
 if __name__ == "__main__":
     unittest.main()

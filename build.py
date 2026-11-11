@@ -41,12 +41,19 @@ FFMPEG_LICENSES = {
 DEPENDENCY_LICENSE_FILES = {
     "dav1d": ("COPYING",),
     "zlib": ("LICENSE",),
+    "x264": ("COPYING",),
+    "x265": ("COPYING",),
+    "svtav1": ("LICENSE.md",),
+    "vpx": ("LICENSE",),
+    "lame": ("COPYING",),
+    "opus": ("COPYING",),
 }
 ALLOWED_INDEVS = ("lavfi",)
+FFMPEG_LIBRARY_FEATURES = frozenset({"x264_hdr10"})
 RELEASE_TAG = re.compile(r"(?:local|[0-9]{8}(?:-r[0-9]+)?)\Z")
 ARCHIVE_NAME = re.compile(
     r"ffmpeg-(?P<upstream>[0-9]+(?:\.[0-9]+)*)\+(?P<tag>local|[0-9]{8}(?:-r[0-9]+)?)"
-    r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)-(?P<profile>play-sdk|tools|runtime)\.tar\.gz\Z"
+    r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)-(?P<profile>play-sdk|tools|runtime|fixtures)\.tar\.gz\Z"
 )
 MANIFEST_KEYS = (
     "contract",
@@ -238,7 +245,24 @@ def load_profile(name):
     targets = profile.get("targets")
     if not isinstance(targets, dict) or not targets:
         fail(f"{path} has no target scope")
+    problems = profile_target_problems(profile)
+    if problems:
+        fail(f"{path}: " + "; ".join(problems))
     return profile, path
+
+
+def profile_target_problems(profile):
+    if not profile.get("test_only"):
+        return []
+    problems = []
+    if profile.get("artifact") != "tools":
+        problems.append("a test-only profile must use the tools artifact")
+    non_linux = sorted(
+        name for name, config in profile.get("targets", {}).items() if config.get("platform") != "linux"
+    )
+    if non_linux:
+        problems.append(f"a test-only profile builds only Linux targets, not {non_linux}")
+    return problems
 
 
 def target_config(profile, target):
@@ -380,7 +404,7 @@ def configure_args_for(profile, target, build_dir, deps, toolchain):
         *FFMPEG_LICENSES[profile["license"]]["configure_flags"],
         "--disable-autodetect",
         "--disable-everything",
-        "--enable-libdav1d",
+        *(f"--enable-lib{library}" for library in config.get("external_libraries", [])),
         "--enable-zlib",
         "--enable-pic",
         f"--cc={cc}",
@@ -530,13 +554,13 @@ def extract_source(source, destination):
     return root
 
 
-def build_zlib(source_dir, prefix, env):
+def build_zlib(source, source_dir, build_dir, prefix, env, config):
     run(["./configure", f"--prefix={prefix}", "--static"], cwd=source_dir, env=env)
     run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
     run(["make", "install"], cwd=source_dir, env=env)
 
 
-def build_dav1d(source_dir, build_dir, prefix, env):
+def build_dav1d(source, source_dir, build_dir, prefix, env, config):
     if build_dir.exists():
         shutil.rmtree(build_dir)
     run(
@@ -555,6 +579,157 @@ def build_dav1d(source_dir, build_dir, prefix, env):
         env=env,
     )
     run(["ninja", "-C", str(build_dir), "install"], env=env)
+
+
+def cmake_build(build_dir, source_dir, prefix, env, options):
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    run(
+        [
+            "cmake",
+            "-S",
+            str(source_dir),
+            "-B",
+            str(build_dir),
+            f"-DCMAKE_INSTALL_PREFIX={prefix}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+            *options,
+        ],
+        env=env,
+    )
+    run(["cmake", "--build", str(build_dir), "-j", str(jobs())], env=env)
+    run(["cmake", "--install", str(build_dir)], env=env)
+
+
+def build_x264(source, source_dir, build_dir, prefix, env, config):
+    run(
+        ["./configure", f"--prefix={prefix}", "--disable-cli", "--enable-static", "--disable-shared", "--enable-pic"],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+def build_x265(source, source_dir, build_dir, prefix, env, config):
+    cmake_build(
+        build_dir,
+        source_dir / "source",
+        prefix,
+        env,
+        ["-DENABLE_SHARED=OFF", "-DENABLE_CLI=OFF", "-DENABLE_ASSEMBLY=ON", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"],
+    )
+    drop_shared_libgcc(prefix / "lib" / "pkgconfig" / "x265.pc")
+
+
+def drop_shared_libgcc(pc_path):
+    # x265's CMake copies the C++ compiler's implicit link libraries, including the
+    # shared-only -lgcc_s, into Libs.private; a static link resolves them from -lgcc.
+    lines = []
+    for line in pc_path.read_text().splitlines():
+        if line.startswith("Libs.private:"):
+            line = " ".join(flag for flag in line.split(" ") if flag != "-lgcc_s")
+        lines.append(line)
+    pc_path.write_text("\n".join(lines) + "\n")
+
+
+def build_svtav1(source, source_dir, build_dir, prefix, env, config):
+    cmake_build(
+        build_dir,
+        source_dir,
+        prefix,
+        env,
+        [
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DBUILD_APPS=OFF",
+            "-DBUILD_TESTING=OFF",
+            "-DSVT_AV1_LTO=OFF",
+            "-DNATIVE=OFF",
+        ],
+    )
+
+
+VPX_TARGETS = {"x86_64": "x86_64-linux-gcc", "aarch64": "arm64-linux-gcc"}
+
+
+def build_vpx(source, source_dir, build_dir, prefix, env, config):
+    run(
+        [
+            "./configure",
+            f"--target={VPX_TARGETS[config['arch']]}",
+            f"--prefix={INSTALL_PREFIX}",
+            "--disable-shared",
+            "--enable-static",
+            "--disable-examples",
+            "--disable-tools",
+            "--disable-docs",
+            "--disable-unit-tests",
+            "--enable-pic",
+        ],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install", f"DIST_DIR={prefix}"], cwd=source_dir, env=env)
+    set_pc_prefix(prefix / "lib" / "pkgconfig" / "vpx.pc", prefix)
+
+
+def set_pc_prefix(pc_path, prefix):
+    # libvpx embeds its configure arguments in vpx_codec_build_config(), so it is
+    # configured with the neutral install prefix and its .pc is pointed at the real one.
+    lines = [
+        f"prefix={prefix}" if line.startswith("prefix=") else line
+        for line in pc_path.read_text().splitlines()
+    ]
+    pc_path.write_text("\n".join(lines) + "\n")
+
+
+def build_lame(source, source_dir, build_dir, prefix, env, config):
+    run(
+        [
+            "./configure",
+            f"--prefix={prefix}",
+            "--disable-shared",
+            "--enable-static",
+            "--disable-frontend",
+            "--disable-decoder",
+            "--enable-nasm",
+        ],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+def build_opus(source, source_dir, build_dir, prefix, env, config):
+    run(
+        [
+            "./configure",
+            f"--prefix={prefix}",
+            "--disable-shared",
+            "--enable-static",
+            "--disable-doc",
+            "--disable-extra-programs",
+        ],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+DEPENDENCY_BUILDERS = {
+    "zlib": build_zlib,
+    "dav1d": build_dav1d,
+    "x264": build_x264,
+    "x265": build_x265,
+    "svtav1": build_svtav1,
+    "vpx": build_vpx,
+    "lame": build_lame,
+    "opus": build_opus,
+}
 
 
 def normalize_pc(stage):
@@ -661,6 +836,8 @@ def parse_external_libraries(config_mak):
              "_muxer", "_hwaccel", "_protocol")
         ):
             continue
+        if name in FFMPEG_LIBRARY_FEATURES:
+            continue
         libraries.add(name[3:] if name.startswith("lib") else name)
     return sorted(libraries)
 
@@ -749,13 +926,16 @@ def sign_libraries(config, stage):
             run(["codesign", "--force", "--sign", "-", str(path)])
 
 
-def license_files(license_name):
-    return {"ffmpeg": FFMPEG_LICENSES[license_name]["ffmpeg_files"], **DEPENDENCY_LICENSE_FILES}
+def license_files(profile):
+    return {
+        "ffmpeg": FFMPEG_LICENSES[profile["license"]]["ffmpeg_files"],
+        **{name: DEPENDENCY_LICENSE_FILES[name] for name in profile["sources"] if name != "ffmpeg"},
+    }
 
 
-def notice_paths(license_name):
+def notice_paths(profile):
     paths = ["README"]
-    for name, files in license_files(license_name).items():
+    for name, files in license_files(profile).items():
         paths.extend(f"share/licenses/{name}/{filename}" for filename in files)
     return paths
 
@@ -766,7 +946,7 @@ def development_link(library, platform_name):
 
 def stage_complete(stage, profile, platform_name):
     artifact = profile["artifact"]
-    if not all((stage / path).is_file() for path in notice_paths(profile["license"])):
+    if not all((stage / path).is_file() for path in notice_paths(profile)):
         return False
     if artifact == "tools":
         required = (*(f"bin/{name}" for name in TOOLS_PROGRAMS), "share/ffmpeg-build/manifest.json")
@@ -875,7 +1055,7 @@ def parse_license(ffmpeg_build):
 
 
 def install_notices(profile, target, sources, stage):
-    for name, files in license_files(profile["license"]).items():
+    for name, files in license_files(profile).items():
         destination = stage / "share" / "licenses" / name
         destination.mkdir(parents=True, exist_ok=True)
         for filename in files:
@@ -894,6 +1074,8 @@ def install_notices(profile, target, sources, stage):
             "include/            FFmpeg headers\n"
             "lib/pkgconfig/      relocatable pkg-config files for shared linking (prefix=${pcfiledir}/../..)\n"
         )
+    elif profile.get("test_only"):
+        contents = "bin/ffmpeg, bin/ffprobe   static, test-only fixture generator; not a runtime; GPL\n"
     else:
         contents = "bin/ffmpeg, bin/ffprobe   static, headless; no network protocols; lavfi is the only device\n"
     (stage / "README").write_text(
@@ -901,7 +1083,7 @@ def install_notices(profile, target, sources, stage):
         "Built by https://github.com/laputa-systems/ffmpeg-build from pinned upstream sources.\n\n"
         + contents
         + "share/ffmpeg-build/manifest.json   sources, configuration, components, toolchain\n"
-        "share/licenses/     upstream licenses and notices for FFmpeg, dav1d, and zlib\n"
+        + f"share/licenses/     upstream licenses and notices for {', '.join(license_files(profile))}\n"
     )
 
 
@@ -941,16 +1123,19 @@ def build(target, profile_name):
         write_linker_responses(build_dir)
 
     source_root = build_dir / "src"
-    ffmpeg_source = extract_source(lock["sources"]["ffmpeg"], source_root)
-    zlib_source = extract_source(lock["sources"]["zlib"], source_root)
-    dav1d_source = extract_source(lock["sources"]["dav1d"], source_root)
+    sources = {name: extract_source(lock["sources"][name], source_root) for name in profile["sources"]}
+    ffmpeg_source = sources["ffmpeg"]
     (ffmpeg_source / "VERSION").write_text(lock["sources"]["ffmpeg"]["version"] + "\n")
 
     env = dep_env(config, deps, toolchain)
-    print(f"build zlib {lock['sources']['zlib']['version']}")
-    build_zlib(zlib_source, deps, env)
-    print(f"build dav1d {lock['sources']['dav1d']['version']}")
-    build_dav1d(dav1d_source, build_dir / "dav1d", deps, env)
+    for name in profile["sources"]:
+        if name == "ffmpeg":
+            continue
+        builder = DEPENDENCY_BUILDERS.get(name)
+        if not builder:
+            fail(f"no builder for source {name}")
+        print(f"build {name} {lock['sources'][name]['version']}")
+        builder(lock["sources"][name], sources[name], build_dir / name, deps, env, config)
 
     ffmpeg_build = build_dir / "ffmpeg"
     ffmpeg_build.mkdir()
@@ -964,12 +1149,7 @@ def build(target, profile_name):
     shutil.rmtree(install_root)
 
     prune_stage(stage, artifact)
-    install_notices(
-        profile,
-        target,
-        {"ffmpeg": ffmpeg_source, "dav1d": dav1d_source, "zlib": zlib_source},
-        stage,
-    )
+    install_notices(profile, target, sources, stage)
     if artifact in ("tools", "runtime"):
         finish_programs(config, stage)
     if artifact == "runtime":
@@ -1213,7 +1393,7 @@ def audit(target, profile_name):
     if config["platform"] == "linux":
         audit_linux_config(case, config, ffmpeg_build, config_mak)
 
-    missing_notices = [path for path in notice_paths(profile["license"]) if not (stage / path).is_file()]
+    missing_notices = [path for path in notice_paths(profile) if not (stage / path).is_file()]
     case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
     problems = license_problems(profile["license"], config_mak)
     case(f"FFmpeg license flags match {profile['license']}", not problems, "; ".join(problems))
@@ -2032,7 +2212,7 @@ def qualify(archive_path):
         "manifest release matches name",
         manifest.get("release") == {"tag": tag, "archive": archive_path.name},
     )
-    missing_notices = [path for path in notice_paths(profile["license"]) if not (prefix / path).is_file()]
+    missing_notices = [path for path in notice_paths(profile) if not (prefix / path).is_file()]
     case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
     leaked = sorted(
         str(path.relative_to(prefix))
@@ -2044,7 +2224,7 @@ def qualify(archive_path):
     if profile["artifact"] == "runtime":
         problems = extracted_library_problems(prefix, manifest.get("libraries", {}), config["platform"])
         case("manifest libraries match the extracted files and links", not problems, "; ".join(problems[:5]))
-    script = ROOT / "tests" / QUALIFY_SCRIPTS[profile["artifact"]]
+    script = ROOT / "tests" / ("qualify-fixtures.sh" if profile.get("test_only") else QUALIFY_SCRIPTS[profile["artifact"]])
     result = subprocess.run(["bash", str(script), str(prefix), target], check=False)
     case(f"{script.name} passes", result.returncode == 0)
     return check.finish()

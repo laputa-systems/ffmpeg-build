@@ -24,8 +24,8 @@ Releases are normal, not prereleases. Consumers enumerate `https://github.com/la
 | `prepare` | `ubuntu-latest` | resolves the tag, reads the upstream version, runs `python3 -m unittest discover -s tests` |
 | `fixtures` | `ubuntu-latest` | `scripts/linux-fixtures.sh`: test fixtures from Alpine FFmpeg 9.0.2 |
 | `build-macos` | `xcode-27` (Xcode 27.1) | `build`, `audit`, `package` for all three profiles; `tests/tools-workflows.sh` on the tools and runtime stages |
-| `build-linux` | `ubuntu-latest`, `ubuntu-24.04-arm` | `scripts/linux-build.sh` for all three profiles (native, in the digest-pinned Alpine image); `package` |
-| `assemble` | `ubuntu-latest` | `.github/scripts/assemble_release.py`: exactly nine archives, `release.json`, `SHA256SUMS` |
+| `build-linux` | `ubuntu-latest`, `ubuntu-24.04-arm` | `scripts/linux-build.sh` for all three profiles, plus `fixtures` on x86-64 (native, in the digest-pinned Alpine image); `package` |
+| `assemble` | `ubuntu-latest` | `.github/scripts/assemble_release.py`: exactly ten archives, `release.json`, `SHA256SUMS` |
 | `qualify-macos` | `xcode-27` | verifies `SHA256SUMS`, then `build.py qualify` on the assembled bytes |
 | `qualify-linux` | `ubuntu-latest`, `ubuntu-24.04-arm` | verifies `SHA256SUMS`, then `scripts/linux-qualify.sh` on the assembled bytes |
 | `publish` | `ubuntu-latest` | the only job with `contents: write`; refuses an existing release, creates the tag at `GITHUB_SHA`, downloads the published assets and verifies them |
@@ -34,7 +34,7 @@ Every action is pinned to a full commit SHA. The Alpine images are pinned by dig
 
 ## Assets
 
-- Nine archives: `ffmpeg-<upstream>+<tag>-<target>-<profile>.tar.gz` for the three targets and the `runtime`, `play-sdk`, and `tools` profiles. See `docs/artifacts.md`.
+- Ten archives: `ffmpeg-<upstream>+<tag>-<target>-<profile>.tar.gz` for the three targets and the `runtime`, `play-sdk`, and `tools` profiles, plus `x86_64-unknown-linux-musl-fixtures`, qualified by `tests/qualify-fixtures.sh`. See `docs/artifacts.md`.
 - `release.json`: `contract`, `tag`, `commit`, `upstream`, and each asset's `name`, `sha256`, and `size`.
 - `SHA256SUMS`: one line per archive, plus `release.json`.
 

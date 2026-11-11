@@ -1,6 +1,8 @@
 # Artifacts
 
-Each release publishes nine archives (three targets, three profiles), plus `SHA256SUMS` and `release.json`.
+Each release publishes ten archives, plus `SHA256SUMS` and `release.json`: three targets for each of the three profiles, and the test-only `x86_64-unknown-linux-musl-fixtures` archive.
+
+The `fixtures` archive is a GPL generator for Play's fixture gate, not a runtime. See `docs/fixtures.md`.
 
 ## Names
 

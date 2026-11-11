@@ -35,15 +35,16 @@ class AssembleReleaseTests(unittest.TestCase):
             paths.append(path)
         return paths
 
-    def test_nine_assets_with_sums_and_release_json(self):
+    def test_ten_assets_with_sums_and_release_json(self):
         names = assemble_release.expected_assets("9.0.2", "20261104")
-        self.assertEqual(len(names), 9)
+        self.assertEqual(len(names), 10)
+        self.assertIn("ffmpeg-9.0.2+20261104-x86_64-unknown-linux-musl-fixtures.tar.gz", names)
         release = assemble_release.assemble(self.write_assets(names), self.root / "release", "9.0.2", "20261104", "c" * 40)
         self.assertEqual([asset["name"] for asset in release["assets"]], names)
         written = json.loads((self.root / "release" / "release.json").read_text())
         self.assertEqual(written["commit"], "c" * 40)
         sums = (self.root / "release" / "SHA256SUMS").read_text().splitlines()
-        self.assertEqual(len(sums), 10)
+        self.assertEqual(len(sums), 11)
         self.assertTrue(sums[-1].endswith("  release.json"))
 
     def test_rejects_missing_or_wrong_tag(self):

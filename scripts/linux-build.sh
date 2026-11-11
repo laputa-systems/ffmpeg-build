@@ -4,7 +4,7 @@ set -euo pipefail
 . "$(dirname "$0")/linux-container.sh"
 
 usage() {
-    printf 'usage: %s <x86_64-unknown-linux-musl|aarch64-unknown-linux-musl> <play-sdk|tools|runtime>\n' "$0" >&2
+    printf 'usage: %s <x86_64-unknown-linux-musl|aarch64-unknown-linux-musl> <play-sdk|tools|runtime|fixtures>\n' "$0" >&2
     exit 2
 }
 
@@ -13,7 +13,7 @@ target=$1
 profile=$2
 platform=$(docker_platform_for "$target") || usage
 case "$profile" in
-    play-sdk|tools|runtime) ;;
+    play-sdk|tools|runtime|fixtures) ;;
     *) usage ;;
 esac
 

@@ -5,7 +5,7 @@ This repository owns the custom FFmpeg sources, pins, profiles, codec recipes, p
 ## Layout
 
 - `sources.lock.json` — upstream URLs, versions, and SHA-256 pins.
-- `profiles/` — the authoritative component and platform configuration for `runtime`, `play-sdk`, and `tools`.
+- `profiles/` — the authoritative component and platform configuration for `runtime`, `play-sdk`, and `tools`, plus the test-only `fixtures` generator.
 - `build.py` — `fetch`, `build`, `audit`, `package`, and `qualify`.
 - `scripts/` — Linux container builds and qualification in the pinned Alpine image (`docker/Dockerfile`).
 - `tests/` — unit tests, tools workflows, the `encode` command, runtime, SDK, and tools qualification, and fixture generation.
@@ -30,10 +30,12 @@ scripts/linux-qualify.sh dist/ffmpeg-9.0.2+local-x86_64-unknown-linux-musl-runti
 scripts/linux-build.sh x86_64-unknown-linux-musl tools
 python3 build.py package --target x86_64-unknown-linux-musl --profile tools --tag local
 scripts/linux-qualify.sh dist/ffmpeg-9.0.2+local-x86_64-unknown-linux-musl-tools.tar.gz
+
+scripts/linux-build.sh x86_64-unknown-linux-musl fixtures
 ```
 
 Targets are `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`. Each builds natively: macOS on the host, Linux in a `linux/amd64` or `linux/arm64` container. Sources are cached under `.work/cache/sources` and verified against `sources.lock.json` on every use. Build trees live at `.work/build/<target>/<profile>` and stages at `.work/stage/<target>/<profile>`.
 
-`runtime` is the union of the other two profiles built once as shared libraries: `ffmpeg`, `ffprobe`, and libav* that find each other through `$ORIGIN` or `@loader_path`, with dav1d and zlib linked in, GPL, and no network protocols or `ffplay`; the virtual `lavfi` input is its only device. `play-sdk` is a static playback SDK with no programs, encoders, muxers, devices, or network protocols. `tools` is the static, headless, GPL `ffmpeg`/`ffprobe` pair, with no network protocols or `ffplay`, and `lavfi` as its only device. `play-sdk` stays LGPL. See `docs/runtime.md`, `docs/play-sdk.md`, `docs/tools-profile.md`, `docs/artifacts.md`, and `docs/release.md`.
+`runtime` is the union of the other two profiles built once as shared libraries: `ffmpeg`, `ffprobe`, and libav* that find each other through `$ORIGIN` or `@loader_path`, with dav1d and zlib linked in, GPL, and no network protocols or `ffplay`; the virtual `lavfi` input is its only device. `play-sdk` is a static playback SDK with no programs, encoders, muxers, devices, or network protocols. `tools` is the static, headless, GPL `ffmpeg`/`ffprobe` pair, with no network protocols or `ffplay`, and `lavfi` as its only device. `play-sdk` stays LGPL. The `fixtures` profile is test-only, GPL, and Linux `x86_64` only: static `ffmpeg`/`ffprobe` with the six external encoders Play's fixture generator needs. It is released only as the `x86_64-unknown-linux-musl-fixtures` archive for generating test data, is not a runtime, and `build.py` rejects any other target. See `docs/runtime.md`, `docs/play-sdk.md`, `docs/tools-profile.md`, `docs/fixtures.md`, `docs/artifacts.md`, and `docs/release.md`.
 
 Tests: `python3 -m unittest discover -s tests`. Fixtures for the workflow tests come from `tests/fixtures/gen.sh .work/fixtures`, which needs a full host FFmpeg 9.0.2, or from `scripts/linux-fixtures.sh`.

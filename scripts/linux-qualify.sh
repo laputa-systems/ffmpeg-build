@@ -20,7 +20,7 @@ case $name in
 esac
 case $name in
     *-play-sdk.tar.gz|*-runtime.tar.gz) image=build ;;
-    *-tools.tar.gz) image=runtime ;;
+    *-tools.tar.gz|*-fixtures.tar.gz) image=runtime ;;
     *) printf 'error: unknown profile in %s\n' "$name" >&2; exit 2 ;;
 esac
 platform=$(docker_platform_for "$target")

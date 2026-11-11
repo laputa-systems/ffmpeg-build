@@ -4,7 +4,7 @@ FROM --platform=linux/arm64 alpine@sha256:42d86a3173522de4786cfba0b5d631dbadb3d0
 ARG TARGETARCH
 FROM alpine-${TARGETARCH} AS build
 RUN apk add --no-cache \
-        bash build-base binutils curl file git linux-headers meson nasm ninja \
+        bash build-base binutils cmake curl diffutils file git linux-headers meson nasm ninja perl \
         pkgconf python3 tar xz bzip2 \
         libva-dev libdrm-dev
 WORKDIR /work

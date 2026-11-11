@@ -9,12 +9,12 @@ from pathlib import Path
 
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
 PROFILES = ("play-sdk", "tools", "runtime")
+TEST_ONLY_ASSETS = (("x86_64-unknown-linux-musl", "fixtures"),)
 
 
 def expected_assets(upstream: str, tag: str) -> list[str]:
-    return sorted(
-        f"ffmpeg-{upstream}+{tag}-{target}-{profile}.tar.gz" for target in TARGETS for profile in PROFILES
-    )
+    pairs = [(target, profile) for target in TARGETS for profile in PROFILES] + list(TEST_ONLY_ASSETS)
+    return sorted(f"ffmpeg-{upstream}+{tag}-{target}-{profile}.tar.gz" for target, profile in pairs)
 
 
 def sha256(path: Path) -> str:

@@ -178,7 +178,11 @@ jobs:
 
       - name: Build, audit, and package
         run: |
-          for profile in play-sdk tools runtime; do
+          profiles="play-sdk tools runtime"
+          if [ "$TARGET" = x86_64-unknown-linux-musl ]; then
+            profiles="$profiles fixtures"
+          fi
+          for profile in $profiles; do
             scripts/linux-build.sh "$TARGET" "$profile"
             python3 build.py package --target "$TARGET" --profile "$profile" --tag "$TAG"
           done
