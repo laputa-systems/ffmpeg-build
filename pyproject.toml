@@ -12,7 +12,7 @@ package = false
 [dependency-groups]
 dev = [
     "ruff==0.17.4",
-    "ty==0.0.99",
+    "ty==0.0.101",
     "uv==0.13.7",
 ]
 
@@ -20,7 +20,7 @@ dev = [
 target-version = "py315"
 
 [tool.ty.environment]
-root = ["scripts", "tests"]
+root = [".", "scripts", "tests"]
 python-version = "3.15"
 
 [[tool.uv.index]]

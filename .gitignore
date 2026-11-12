@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 dist/
 .work
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.venv/

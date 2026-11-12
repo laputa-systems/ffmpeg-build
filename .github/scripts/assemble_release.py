@@ -10,11 +10,19 @@ from pathlib import Path
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
 PROFILES = ("play-sdk", "tools", "runtime")
 TEST_ONLY_ASSETS = (("x86_64-unknown-linux-musl", "fixtures"),)
+ARCHIVE_SUFFIX = ".tar.xz"
+MANIFEST_SUFFIX = ".manifest.json"
 
 
-def expected_assets(upstream: str, tag: str) -> list[str]:
+def expected_stems(version: str) -> list[str]:
     pairs = [(target, profile) for target in TARGETS for profile in PROFILES] + list(TEST_ONLY_ASSETS)
-    return sorted(f"ffmpeg-{upstream}+{tag}-{target}-{profile}.tar.gz" for target, profile in pairs)
+    return sorted(f"ffmpeg-{profile}-{version}-{target}" for target, profile in pairs)
+
+
+def expected_assets(version: str) -> list[str]:
+    return sorted(
+        f"{stem}{suffix}" for stem in expected_stems(version) for suffix in (ARCHIVE_SUFFIX, MANIFEST_SUFFIX)
+    )
 
 
 def sha256(path: Path) -> str:
@@ -25,9 +33,9 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def manifest_commit(path: Path) -> str | None:
-    member = f"{path.name.removesuffix('.tar.gz')}/share/ffmpeg-build/manifest.json"
-    with tarfile.open(path, "r:gz") as archive:
+def archive_commit(path: Path) -> str | None:
+    member = f"{path.name.removesuffix(ARCHIVE_SUFFIX)}/share/ffmpeg-build/manifest.json"
+    with tarfile.open(path, "r:xz") as archive:
         try:
             handle = archive.extractfile(member)
         except KeyError:
@@ -37,8 +45,24 @@ def manifest_commit(path: Path) -> str | None:
         return json.load(handle).get("producer", {}).get("commit")
 
 
-def assemble(found: list[Path], destination: Path, upstream: str, tag: str, commit: str) -> dict:
-    wanted = expected_assets(upstream, tag)
+def check_manifest(path: Path, stem: str, version: str, commit: str, lock_sha256: str) -> None:
+    manifest = json.loads(path.read_text())
+    profile, _, target = stem.removeprefix("ffmpeg-").partition(f"-{version}-")
+    expected = {
+        "schema_version": 1,
+        "product": f"ffmpeg-{profile}",
+        "version": version,
+        "target": target,
+        "source_revision": commit,
+        "sources_lock_sha256": lock_sha256,
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ValueError(f"{path.name}: {key} is {manifest.get(key)!r}, expected {value!r}")
+
+
+def assemble(found: list[Path], destination: Path, version: str, commit: str, lock_sha256: str) -> list[str]:
+    wanted = expected_assets(version)
     by_name: dict[str, Path] = {}
     for path in found:
         if path.name in by_name:
@@ -48,34 +72,36 @@ def assemble(found: list[Path], destination: Path, upstream: str, tag: str, comm
         missing = sorted(set(wanted) - set(by_name))
         extra = sorted(set(by_name) - set(wanted))
         raise ValueError(f"asset set mismatch: missing {missing}, unexpected {extra}")
-    for name in wanted:
-        found_commit = manifest_commit(by_name[name])
+    for stem in expected_stems(version):
+        check_manifest(by_name[f"{stem}{MANIFEST_SUFFIX}"], stem, version, commit, lock_sha256)
+        found_commit = archive_commit(by_name[f"{stem}{ARCHIVE_SUFFIX}"])
         if found_commit != commit:
-            raise ValueError(f"{name} was built from {found_commit!r}, not {commit}")
+            raise ValueError(f"{stem}{ARCHIVE_SUFFIX} was built from {found_commit!r}, not {commit}")
     destination.mkdir(parents=True, exist_ok=False)
-    assets = []
     for name in wanted:
         shutil.copyfile(by_name[name], destination / name)
-        assets.append({"name": name, "sha256": sha256(destination / name), "size": (destination / name).stat().st_size})
-    release = {"contract": 1, "tag": tag, "commit": commit, "upstream": upstream, "assets": assets}
-    (destination / "release.json").write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
-    lines = [f"{asset['sha256']}  {asset['name']}\n" for asset in assets]
-    lines.append(f"{sha256(destination / 'release.json')}  release.json\n")
-    (destination / "SHA256SUMS").write_text("".join(lines))
-    return release
+    (destination / "SHA256SUMS").write_text("".join(f"{sha256(destination / name)}  {name}\n" for name in wanted))
+    return wanted
 
 
 def main() -> int:
-    if len(sys.argv) != 6:
-        print("usage: assemble_release.py <artifacts-dir> <release-dir> <upstream> <tag> <commit>", file=sys.stderr)
+    if len(sys.argv) != 5:
+        print("usage: assemble_release.py <artifacts-dir> <release-dir> <version> <commit>", file=sys.stderr)
         return 2
-    source, destination, upstream, tag, commit = sys.argv[1:]
+    source, destination, version, commit = sys.argv[1:]
     try:
-        release = assemble(sorted(Path(source).rglob("*.tar.gz")), Path(destination), upstream, tag, commit)
+        lock_sha256 = sha256(Path("sources.lock.json"))
+        assets = assemble(
+            sorted(p for p in Path(source).rglob("*") if p.name.endswith((ARCHIVE_SUFFIX, MANIFEST_SUFFIX))),
+            Path(destination),
+            version,
+            commit,
+            lock_sha256,
+        )
     except (OSError, ValueError) as error:
         print(f"assemble failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(release, indent=2, sort_keys=True))
+    print("\n".join(assets))
     return 0
 
 
