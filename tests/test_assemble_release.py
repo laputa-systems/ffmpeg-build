@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import pathlib
+import shutil
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ assemble_release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assemble_release)
 sys.path.insert(0, str(ROOT))
 import build
+from bootstrap import release
 
 COMMIT = "c" * 40
 LOCK = "a" * 64
@@ -37,7 +39,11 @@ class AssembleReleaseTests(unittest.TestCase):
             directory.mkdir()
             archive = directory / f"{stem}.tar.xz"
             manifest = json.dumps({"producer": {"commit": commit}}).encode()
-            build.write_deterministic_archive(archive, stem, {"share/ffmpeg-build/manifest.json": (manifest, False)})
+            tree = directory / "tree"
+            (tree / "share" / "ffmpeg-build").mkdir(parents=True)
+            (tree / "share" / "ffmpeg-build" / "manifest.json").write_bytes(manifest)
+            release.create_archive(tree, archive, mtime=0, prefix=stem)
+            shutil.rmtree(tree)
             profile, _, target = stem.removeprefix("ffmpeg-").partition(f"-{VERSION}-")
             sidecar = directory / f"{stem}.manifest.json"
             sidecar.write_text(

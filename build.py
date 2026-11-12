@@ -3,9 +3,7 @@
 
 import argparse
 import hashlib
-import io
 import json
-import lzma
 import os
 import pathlib
 import platform
@@ -17,9 +15,10 @@ import sys
 import tarfile
 from typing import Any, NoReturn
 
+from bootstrap import CACHE, hashing, locks, release, targets
+
 ROOT = pathlib.Path(__file__).resolve().parent
 WORK = ROOT / ".work"
-CACHE = WORK / "cache" / "sources"
 BUILD_ROOT = WORK / "build"
 STAGE_ROOT = WORK / "stage"
 TMP_ROOT = WORK / "tmp"
@@ -51,7 +50,6 @@ DEPENDENCY_LICENSE_FILES = {
 ALLOWED_INDEVS = ("lavfi",)
 FFMPEG_LIBRARY_FEATURES = frozenset({"x264_hdr10"})
 ARCHIVE_SUFFIX = ".tar.xz"
-MANIFEST_SUFFIX = ".manifest.json"
 ARCHIVE_NAME = re.compile(
     r"ffmpeg-(?P<profile>play-sdk|tools|runtime|fixtures)-(?P<version>[0-9]+(?:\.[0-9]+)*)"
     r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)\.tar\.xz\Z"
@@ -165,14 +163,6 @@ def read_json(path):
         fail(f"cannot read {path}: {exc}")
 
 
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def run(command, cwd=None, env=None, capture=False, quiet=False):
     if not quiet:
         print("+ " + " ".join(shlex.quote(str(part)) for part in command))
@@ -200,34 +190,17 @@ def jobs():
     return max(1, os.cpu_count() or 1)
 
 
-def source_urls(source):
-    if "urls" in source:
-        return list(source["urls"])
-    return [source["url"]]
-
-
 def load_sources():
-    lock = read_json(ROOT / "sources.lock.json")
-    if lock.get("schema_version") != 1:
-        fail("sources.lock.json schema_version must be 1")
-    inputs = lock.get("inputs")
-    if not isinstance(inputs, list) or not inputs:
-        fail("sources.lock.json has no inputs")
-    sources = {}
-    for source in inputs:
-        name = source.get("name")
-        if not name or name in sources:
-            fail(f"sources.lock.json input name {name!r} is missing or duplicated")
-        for key in ("version", "sha256", "filename", "archive_root"):
-            if not source.get(key):
-                fail(f"source {name} lacks {key}")
-        urls = source.get("urls", [source["url"]] if source.get("url") else [])
-        if not isinstance(urls, list) or not urls or not all(isinstance(url, str) and url for url in urls):
-            fail(f"source {name} needs a url or a non-empty urls list")
-        if not re.fullmatch(r"[0-9a-f]{64}", source["sha256"]):
-            fail(f"source {name} has an invalid sha256")
-        sources[name] = source
-    return sources
+    try:
+        lock = locks.load_sources(ROOT / "sources.lock.json")
+    except locks.LockError as exc:
+        fail(exc)
+    for item in lock.inputs:
+        if item.role == "source":
+            for key in ("filename", "archive_root"):
+                if not item.extra.get(key):
+                    fail(f"source {item.name} lacks {key}")
+    return {item.name: item for item in lock.inputs}
 
 
 ARTIFACTS = ("sdk", "tools", "runtime")
@@ -237,10 +210,7 @@ SYSTEM_LIBRARY_SONAMES = {
     "libva": "libva.so.2",
     "libva-drm": "libva-drm.so.2",
 }
-MUSL_LOADER = {
-    "x86_64": "/lib/ld-musl-x86_64.so.1",
-    "aarch64": "/lib/ld-musl-aarch64.so.1",
-}
+MUSL_LOADER = {target.machine: target.musl_loader for target in targets.TARGETS.values() if target.is_linux}
 RUNTIME_SEARCH_PATHS = {
     "linux": {"program": "$ORIGIN/../lib", "library": "$ORIGIN"},
     "macos": {"program": "@loader_path/../lib", "library": "@loader_path"},
@@ -257,8 +227,8 @@ def load_profile(name):
         fail(f"{path} artifact must be one of {ARTIFACTS}")
     if profile.get("license") not in FFMPEG_LICENSES:
         fail(f"{path} license must be one of {sorted(FFMPEG_LICENSES)}")
-    targets = profile.get("targets")
-    if not isinstance(targets, dict) or not targets:
+    scope = profile.get("targets")
+    if not isinstance(scope, dict) or not scope:
         fail(f"{path} has no target scope")
     problems = profile_target_problems(profile)
     if problems:
@@ -340,21 +310,16 @@ def configure_component(category, name):
     return COMPONENT_ALIASES.get((category, name), name)
 
 
-HOST_PLATFORMS = {
-    ("Darwin", "arm64"): ("macos", "aarch64"),
-    ("Linux", "x86_64"): ("linux", "x86_64"),
-    ("Linux", "aarch64"): ("linux", "aarch64"),
-}
-
-
 def require_native_host(config, target):
-    host = HOST_PLATFORMS.get((platform.system(), platform.machine()))
-    wanted = (config["platform"], config["arch"])
-    if host != wanted:
+    try:
+        host = targets.native_target().triple
+    except targets.UnsupportedTargetError:
+        host = None
+    if host != target:
         fail(
-            f"target {target} builds natively on {wanted[0]} {wanted[1]}; "
+            f"target {target} builds natively on {config['platform']} {config['arch']}; "
             f"this host is {platform.system()} {platform.machine()}"
-            + ("; use scripts/linux-build.sh" if wanted[0] == "linux" else "")
+            + ("; use scripts/linux-build.sh" if config["platform"] == "linux" else "")
         )
 
 
@@ -526,32 +491,11 @@ def ffmpeg_env(config, deps):
 
 
 def fetch_source(name, source):
-    CACHE.mkdir(parents=True, exist_ok=True)
-    path = CACHE / source["filename"]
-    if path.exists():
-        digest = sha256_file(path)
-        if digest == source["sha256"]:
-            print(f"cached {name} {source['version']} sha256 {digest}")
-            return path
-        print(f"cached {name} has the wrong sha256; discarding {path.name}")
-        path.unlink()
-    part = path.with_name(path.name + ".part")
+    print(f"fetch {name} {source.version} sha256 {source.sha256}")
     try:
-        for url in source_urls(source):
-            print(f"download {name} {source['version']} from {url}")
-            run(["curl", "-fsSL", url, "-o", str(part)])
-            digest = sha256_file(part)
-            if digest == source["sha256"]:
-                break
-            print(f"checksum mismatch for {name} from {url}: got {digest}", file=sys.stderr)
-        else:
-            fail(f"no mirror served {name} with sha256 {source['sha256']}")
-        part.replace(path)
-    finally:
-        if part.exists():
-            part.unlink()
-    print(f"verified {name} sha256 {source['sha256']}")
-    return path
+        locks.fetch_input(source, CACHE / source.extra["filename"])
+    except locks.FetchError as exc:
+        fail(exc)
 
 
 def fetch_profile_sources(profile, lock):
@@ -566,10 +510,11 @@ def fetch_profile_sources(profile, lock):
 
 def extract_source(source, destination):
     destination.mkdir(parents=True, exist_ok=True)
-    run(["tar", "-xf", str(CACHE / source["filename"]), "-C", str(destination)])
-    root = destination / source["archive_root"]
+    filename, archive_root = source.extra["filename"], source.extra["archive_root"]
+    run(["tar", "-xf", str(CACHE / filename), "-C", str(destination)])
+    root = destination / archive_root
     if not root.is_dir():
-        fail(f"archive {source['filename']} did not contain {source['archive_root']}")
+        fail(f"archive {filename} did not contain {archive_root}")
     return root
 
 
@@ -1024,9 +969,9 @@ def manifest_for(profile, target, build_dir, stage, args, toolchain):
     for name in profile["sources"]:
         source = lock[name]
         sources[name] = {
-            "version": source["version"],
-            "sha256": source["sha256"],
-            "url": source_urls(source)[0],
+            "version": source.version,
+            "sha256": source.sha256,
+            "url": source.url,
         }
     manifest = {
         "contract": 1,
@@ -1132,7 +1077,7 @@ def build(target, profile_name):
     source_root = build_dir / "src"
     sources = {name: extract_source(lock[name], source_root) for name in profile["sources"]}
     ffmpeg_source = sources["ffmpeg"]
-    (ffmpeg_source / "VERSION").write_text(lock["ffmpeg"]["version"] + "\n")
+    (ffmpeg_source / "VERSION").write_text(lock["ffmpeg"].version + "\n")
 
     env = dep_env(config, deps, toolchain)
     for name in profile["sources"]:
@@ -1141,14 +1086,14 @@ def build(target, profile_name):
         builder = DEPENDENCY_BUILDERS.get(name)
         if not builder:
             fail(f"no builder for source {name}")
-        print(f"build {name} {lock[name]['version']}")
+        print(f"build {name} {lock[name].version}")
         builder(lock[name], sources[name], build_dir / name, deps, env, config)
 
     ffmpeg_build = build_dir / "ffmpeg"
     ffmpeg_build.mkdir()
-    print(f"configure FFmpeg {lock['ffmpeg']['version']}")
+    print(f"configure FFmpeg {lock['ffmpeg'].version}")
     run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
-    print(f"build FFmpeg {lock['ffmpeg']['version']}")
+    print(f"build FFmpeg {lock['ffmpeg'].version}")
     run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
     install_root = build_dir / "install"
     run(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
@@ -1175,13 +1120,13 @@ def build(target, profile_name):
         "profile": profile_name,
         "sources": {
             name: {
-                "version": lock[name]["version"],
-                "sha256": lock[name]["sha256"],
+                "version": lock[name].version,
+                "sha256": lock[name].sha256,
             }
             for name in profile["sources"]
         },
-        "profile_sha256": sha256_file(profile_path),
-        "build_py_sha256": sha256_file(ROOT / "build.py"),
+        "profile_sha256": hashing.sha256_file(profile_path),
+        "build_py_sha256": hashing.sha256_file(ROOT / "build.py"),
         "flags": args,
         "toolchain": toolchain,
     }
@@ -1351,7 +1296,7 @@ def audit(target, profile_name):
             "manifest sources",
             all(
                 manifest.get("sources", {}).get(name, {}).get("sha256")
-                == lock[name]["sha256"]
+                == lock[name].sha256
                 for name in profile["sources"]
             ),
         )
@@ -1408,7 +1353,7 @@ def audit(target, profile_name):
     leaked = build_prefix_leaks(stage)
     case("no absolute build prefix in artifact", not leaked, f"files: {leaked[:10]}")
 
-    version = lock["ffmpeg"]["version"]
+    version = lock["ffmpeg"].version
     if artifact == "sdk":
         audit_sdk(case, target, profile_name, config, stage, version)
     elif artifact == "runtime":
@@ -1668,13 +1613,12 @@ def stage_tree(stage):
     return regular, links
 
 
-def stage_entries(stage):
+def stage_links(stage):
     regular, links = stage_tree(stage)
-    files = {relative: (path.read_bytes(), os.access(path, os.X_OK)) for relative, path in regular.items()}
-    problems = symlink_problems(links, set(files))
+    problems = symlink_problems(links, set(regular))
     if problems:
         fail("unsafe symlinks in stage: " + "; ".join(problems))
-    return files, links
+    return links
 
 
 def versioned_library_pattern(library, platform_name):
@@ -1799,7 +1743,7 @@ def runtime_libraries_manifest(stage, platform_name):
             "file": entry["file"],
             "links": entry["links"],
             identity_key(platform_name): library_identity(stage / entry["file"], platform_name),
-            "sha256": sha256_file(stage / entry["file"]),
+            "sha256": hashing.sha256_file(stage / entry["file"]),
         }
         for library, entry in layout.items()
     }
@@ -1938,7 +1882,7 @@ def audit_runtime(case, config, stage, version, requested, resolved, manifest):
             "file": entry["file"],
             "links": entry["links"],
             key: expected_identity[library],
-            "sha256": sha256_file(stage / entry["file"]),
+            "sha256": hashing.sha256_file(stage / entry["file"]),
         }
         for library, entry in layout.items()
     }
@@ -2036,50 +1980,6 @@ def audit_runtime_macho(case, config, path, role, siblings):
         case(f"{name} exports no dav1d or zlib symbols", not leaks, f"exports: {leaks[:10]}")
 
 
-def archive_name(version, target, profile_name):
-    return f"ffmpeg-{profile_name}-{version}-{target}"
-
-
-def tar_entry(name, mode, size=0, kind=tarfile.REGTYPE):
-    info = tarfile.TarInfo(name)
-    info.type = kind
-    info.mode = mode
-    info.size = size
-    info.uid = info.gid = 0
-    info.uname = info.gname = ""
-    info.mtime = 0
-    return info
-
-
-def write_deterministic_archive(path, root_name, files, links=None):
-    links = links or {}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    part = path.with_name(path.name + ".part")
-    directories = {root_name}
-    for relative in (*files, *links):
-        parent = pathlib.PurePosixPath(relative).parent
-        while str(parent) != ".":
-            directories.add(f"{root_name}/{parent}")
-            parent = parent.parent
-    with (
-        part.open("wb") as raw,
-        lzma.LZMAFile(raw, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed,
-        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
-    ):
-        for directory in sorted(directories):
-            archive.addfile(tar_entry(directory, 0o755, kind=tarfile.DIRTYPE))
-        for relative in sorted((*files, *links)):
-            if relative in links:
-                info = tar_entry(f"{root_name}/{relative}", 0o777, kind=tarfile.SYMTYPE)
-                info.linkname = links[relative]
-                archive.addfile(info)
-                continue
-            data, executable = files[relative]
-            info = tar_entry(f"{root_name}/{relative}", 0o755 if executable else 0o644, len(data))
-            archive.addfile(info, io.BytesIO(data))
-    part.replace(path)
-
-
 def package(target, profile_name):
     lock = load_sources()
     profile, _ = load_profile(profile_name)
@@ -2088,34 +1988,36 @@ def package(target, profile_name):
     if not stage_complete(stage, profile, config["platform"]):
         fail(f"stage {stage} is incomplete; run build first")
     manifest = json.loads((stage / "share" / "ffmpeg-build" / "manifest.json").read_text())
-    version = lock["ffmpeg"]["version"]
+    version = lock["ffmpeg"].version
     if manifest.get("profile") != profile_name or manifest.get("target") != target:
         fail(f"stage manifest is for {manifest.get('profile')}/{manifest.get('target')}")
     if manifest.get("sources", {}).get("ffmpeg", {}).get("version") != version:
         fail("stage manifest FFmpeg version disagrees with sources.lock.json")
     if not COMMIT.match(manifest.get("producer", {}).get("commit", "")):
         fail("stage manifest producer commit is not a commit hash")
-    name = archive_name(version, target, profile_name)
-    manifest["release"] = {"archive": f"{name}{ARCHIVE_SUFFIX}"}
-    files, links = stage_entries(stage)
-    if links and profile["artifact"] != "runtime":
-        fail(f"{profile['artifact']} stages carry no symlinks; found {sorted(links)}")
-    files["share/ffmpeg-build/manifest.json"] = (
-        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
-        False,
-    )
-    destination = DIST / f"{name}{ARCHIVE_SUFFIX}"
-    write_deterministic_archive(destination, name, files, links)
-    release_manifest = {
-        "schema_version": 1,
-        "product": f"ffmpeg-{profile_name}",
-        "version": version,
-        "target": target,
-        "source_revision": manifest["producer"]["commit"],
-        "sources_lock_sha256": sha256_file(ROOT / "sources.lock.json"),
-    }
-    (DIST / f"{name}{MANIFEST_SUFFIX}").write_text(json.dumps(release_manifest, indent=2, sort_keys=True) + "\n")
-    print(f"{sha256_file(destination)}  {destination.name}")
+    product = f"ffmpeg-{profile_name}"
+    try:
+        archive_file = release.archive_name(product, version, target)
+        name = archive_file.removesuffix(ARCHIVE_SUFFIX)
+        manifest["release"] = {"archive": archive_file}
+        links = stage_links(stage)
+        if links and profile["artifact"] != "runtime":
+            fail(f"{profile['artifact']} stages carry no symlinks; found {sorted(links)}")
+        write_manifest(stage, manifest)
+        destination = release.create_archive(stage, DIST / archive_file, mtime=0, prefix=name)
+        release.write_manifest(
+            DIST,
+            release.build_manifest(
+                product=product,
+                version=version,
+                target=target,
+                source_revision=manifest["producer"]["commit"],
+                sources_lock_sha256=hashing.sha256_file(ROOT / "sources.lock.json"),
+            ),
+        )
+    except (release.ReleaseError, targets.UnsupportedTargetError) as exc:
+        fail(exc)
+    print(f"{hashing.sha256_file(destination)}  {destination.name}")
     return destination
 
 
@@ -2167,7 +2069,7 @@ def extracted_library_problems(prefix, libraries, platform_name):
         if not path.is_file() or path.is_symlink():
             problems.append(f"{library}: {entry.get('file')} is not a regular file")
             continue
-        if sha256_file(path) != entry.get("sha256"):
+        if hashing.sha256_file(path) != entry.get("sha256"):
             problems.append(f"{library}: sha256 mismatch")
         if not entry.get(key):
             problems.append(f"{library}: no {key}")
@@ -2213,12 +2115,12 @@ def qualify(archive_path):
     case(
         "manifest FFmpeg version matches name",
         manifest.get("sources", {}).get("ffmpeg", {}).get("version") == parsed["version"]
-        == lock["ffmpeg"]["version"],
+        == lock["ffmpeg"].version,
     )
     case(
         "manifest sources match the lock",
         all(
-            manifest.get("sources", {}).get(name, {}).get("sha256") == lock[name]["sha256"]
+            manifest.get("sources", {}).get(name, {}).get("sha256") == lock[name].sha256
             for name in profile["sources"]
         ),
     )
@@ -2265,7 +2167,7 @@ def main():
     if args.command == "qualify":
         return qualify(args.archive)
     if args.command == "version":
-        print(load_sources()["ffmpeg"]["version"])
+        print(load_sources()["ffmpeg"].version)
         return 0
     profile, _ = load_profile(args.profile)
     target_config(profile, args.target)

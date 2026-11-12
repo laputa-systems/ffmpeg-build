@@ -18,6 +18,7 @@ python3 -m unittest discover -s tests
 
 ## Invariants
 
+- `build.py` and `.github/scripts/assemble_release.py` import `laputa-buildlib` through `bootstrap.py`, which puts the wheel pinned in `sources.lock.json` on `sys.path` (fetched into `.work/cache/sources`); keep `pyproject.toml` and the lock on the same version.
 - Build only from `sources.lock.json` (`schema_version` 1, an `inputs` list); every input has a name, version, URL, and SHA-256.
 - The profile is the authoritative component list. Do not add a component without a named workflow that fails without it.
 - `runtime` is exactly the union of `tools` and `play-sdk` per target, built shared: no network protocols or `ffplay`, and the virtual `lavfi` input is the only device.

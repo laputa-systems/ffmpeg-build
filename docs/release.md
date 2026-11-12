@@ -26,7 +26,7 @@ Releases are pre-releases. Consumers enumerate `https://github.com/laputa-system
 | `verify` | `xcode-27`, `ubuntu-26.04`, `ubuntu-26.04-arm` | `sha256sum -c` (`shasum -a 256 -c` on macOS), then `make verify TARGET=<triple>` on the assembled bytes |
 | `publish` | `ubuntu-26.04-arm` | the only job with `contents: write`; rechecks the ref, creates the tag, writes the release notes, creates the pre-release, and compares the published `SHA256SUMS` |
 
-Every action is pinned to a full commit SHA. The Alpine images are pinned by digest in `docker/Dockerfile`, the same digests `python-build` uses. The only cache holds verified source tarballs. Its key covers the source lock, the profiles, `build.py`, the scripts, the Dockerfile, the target, and the runner.
+Every action is pinned to a full commit SHA. The Alpine images are pinned by digest in `docker/Dockerfile`, the same digests `python-build` uses. The only cache holds verified source tarballs and the pinned `laputa-buildlib` wheel. Its key covers the source lock, the profiles, `build.py`, the scripts, the Dockerfile, the target, and the runner.
 
 ## Assets
 
