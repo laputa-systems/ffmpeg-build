@@ -2,20 +2,20 @@
 """Build, audit, and inspect the pinned FFmpeg profiles."""
 
 import argparse
-import datetime
 import hashlib
+import io
 import json
+import lzma
 import os
 import pathlib
 import platform
 import re
 import shlex
 import shutil
-import gzip
-import io
 import subprocess
 import sys
 import tarfile
+from typing import Any, NoReturn
 
 ROOT = pathlib.Path(__file__).resolve().parent
 WORK = ROOT / ".work"
@@ -50,10 +50,11 @@ DEPENDENCY_LICENSE_FILES = {
 }
 ALLOWED_INDEVS = ("lavfi",)
 FFMPEG_LIBRARY_FEATURES = frozenset({"x264_hdr10"})
-RELEASE_TAG = re.compile(r"(?:local|[0-9]{8}(?:-r[0-9]+)?)\Z")
+ARCHIVE_SUFFIX = ".tar.xz"
+MANIFEST_SUFFIX = ".manifest.json"
 ARCHIVE_NAME = re.compile(
-    r"ffmpeg-(?P<upstream>[0-9]+(?:\.[0-9]+)*)\+(?P<tag>local|[0-9]{8}(?:-r[0-9]+)?)"
-    r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)-(?P<profile>play-sdk|tools|runtime|fixtures)\.tar\.gz\Z"
+    r"ffmpeg-(?P<profile>play-sdk|tools|runtime|fixtures)-(?P<version>[0-9]+(?:\.[0-9]+)*)"
+    r"-(?P<target>[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?)\.tar\.xz\Z"
 )
 MANIFEST_KEYS = (
     "contract",
@@ -153,7 +154,7 @@ NETWORK_PROTOCOLS = {
 }
 
 
-def fail(message):
+def fail(message) -> NoReturn:
     raise SystemExit(f"error: {message}")
 
 
@@ -199,20 +200,34 @@ def jobs():
     return max(1, os.cpu_count() or 1)
 
 
+def source_urls(source):
+    if "urls" in source:
+        return list(source["urls"])
+    return [source["url"]]
+
+
 def load_sources():
     lock = read_json(ROOT / "sources.lock.json")
-    if lock.get("contract") != 1:
-        fail("sources.lock.json contract must be 1")
-    sources = lock.get("sources")
-    if not isinstance(sources, dict) or not sources:
-        fail("sources.lock.json has no sources")
-    for name, source in sources.items():
-        for key in ("url", "sha256", "filename", "archive_root"):
+    if lock.get("schema_version") != 1:
+        fail("sources.lock.json schema_version must be 1")
+    inputs = lock.get("inputs")
+    if not isinstance(inputs, list) or not inputs:
+        fail("sources.lock.json has no inputs")
+    sources = {}
+    for source in inputs:
+        name = source.get("name")
+        if not name or name in sources:
+            fail(f"sources.lock.json input name {name!r} is missing or duplicated")
+        for key in ("version", "sha256", "filename", "archive_root"):
             if not source.get(key):
                 fail(f"source {name} lacks {key}")
+        urls = source.get("urls", [source["url"]] if source.get("url") else [])
+        if not isinstance(urls, list) or not urls or not all(isinstance(url, str) and url for url in urls):
+            fail(f"source {name} needs a url or a non-empty urls list")
         if not re.fullmatch(r"[0-9a-f]{64}", source["sha256"]):
             fail(f"source {name} has an invalid sha256")
-    return lock
+        sources[name] = source
+    return sources
 
 
 ARTIFACTS = ("sdk", "tools", "runtime")
@@ -520,13 +535,17 @@ def fetch_source(name, source):
             return path
         print(f"cached {name} has the wrong sha256; discarding {path.name}")
         path.unlink()
-    print(f"download {name} {source['version']} from {source['url']}")
     part = path.with_name(path.name + ".part")
     try:
-        run(["curl", "-fsSL", source["url"], "-o", str(part)])
-        digest = sha256_file(part)
-        if digest != source["sha256"]:
-            fail(f"checksum mismatch for {name}: got {digest}, expected {source['sha256']}")
+        for url in source_urls(source):
+            print(f"download {name} {source['version']} from {url}")
+            run(["curl", "-fsSL", url, "-o", str(part)])
+            digest = sha256_file(part)
+            if digest == source["sha256"]:
+                break
+            print(f"checksum mismatch for {name} from {url}: got {digest}", file=sys.stderr)
+        else:
+            fail(f"no mirror served {name} with sha256 {source['sha256']}")
         part.replace(path)
     finally:
         if part.exists():
@@ -540,9 +559,9 @@ def fetch_profile_sources(profile, lock):
     if not isinstance(names, list) or not names:
         fail(f"profile {profile['profile']} has no sources")
     for name in names:
-        if name not in lock["sources"]:
+        if name not in lock:
             fail(f"profile {profile['profile']} references unknown source {name}")
-        fetch_source(name, lock["sources"][name])
+        fetch_source(name, lock[name])
 
 
 def extract_source(source, destination):
@@ -838,7 +857,7 @@ def parse_external_libraries(config_mak):
             continue
         if name in FFMPEG_LIBRARY_FEATURES:
             continue
-        libraries.add(name[3:] if name.startswith("lib") else name)
+        libraries.add(name.removeprefix("lib"))
     return sorted(libraries)
 
 
@@ -995,18 +1014,6 @@ def git_commit():
     return commit
 
 
-def valid_release_tag(tag):
-    if not RELEASE_TAG.match(tag):
-        return False
-    if tag == "local":
-        return True
-    try:
-        datetime.datetime.strptime(tag[:8], "%Y%m%d")
-    except ValueError:
-        return False
-    return True
-
-
 def manifest_for(profile, target, build_dir, stage, args, toolchain):
     config = target_config(profile, target)
     requested = requested_components(profile, target)
@@ -1015,11 +1022,11 @@ def manifest_for(profile, target, build_dir, stage, args, toolchain):
     sources = {}
     lock = load_sources()
     for name in profile["sources"]:
-        source = lock["sources"][name]
+        source = lock[name]
         sources[name] = {
             "version": source["version"],
             "sha256": source["sha256"],
-            "url": source["url"],
+            "url": source_urls(source)[0],
         }
     manifest = {
         "contract": 1,
@@ -1123,9 +1130,9 @@ def build(target, profile_name):
         write_linker_responses(build_dir)
 
     source_root = build_dir / "src"
-    sources = {name: extract_source(lock["sources"][name], source_root) for name in profile["sources"]}
+    sources = {name: extract_source(lock[name], source_root) for name in profile["sources"]}
     ffmpeg_source = sources["ffmpeg"]
-    (ffmpeg_source / "VERSION").write_text(lock["sources"]["ffmpeg"]["version"] + "\n")
+    (ffmpeg_source / "VERSION").write_text(lock["ffmpeg"]["version"] + "\n")
 
     env = dep_env(config, deps, toolchain)
     for name in profile["sources"]:
@@ -1134,14 +1141,14 @@ def build(target, profile_name):
         builder = DEPENDENCY_BUILDERS.get(name)
         if not builder:
             fail(f"no builder for source {name}")
-        print(f"build {name} {lock['sources'][name]['version']}")
-        builder(lock["sources"][name], sources[name], build_dir / name, deps, env, config)
+        print(f"build {name} {lock[name]['version']}")
+        builder(lock[name], sources[name], build_dir / name, deps, env, config)
 
     ffmpeg_build = build_dir / "ffmpeg"
     ffmpeg_build.mkdir()
-    print(f"configure FFmpeg {lock['sources']['ffmpeg']['version']}")
+    print(f"configure FFmpeg {lock['ffmpeg']['version']}")
     run([str(ffmpeg_source / "configure"), *args], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
-    print(f"build FFmpeg {lock['sources']['ffmpeg']['version']}")
+    print(f"build FFmpeg {lock['ffmpeg']['version']}")
     run(["make", f"-j{jobs()}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
     install_root = build_dir / "install"
     run(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
@@ -1168,8 +1175,8 @@ def build(target, profile_name):
         "profile": profile_name,
         "sources": {
             name: {
-                "version": lock["sources"][name]["version"],
-                "sha256": lock["sources"][name]["sha256"],
+                "version": lock[name]["version"],
+                "sha256": lock[name]["sha256"],
             }
             for name in profile["sources"]
         },
@@ -1195,7 +1202,7 @@ FFMPEG_ARCH_DEFINE = {
 HOST_CPU_FLAGS = re.compile(r"-m(?:arch|cpu|tune)=native\b")
 
 
-COMPILE_FLAG_VARIABLES = re.compile(r"^(?:CPPFLAGS|CFLAGS|CXXFLAGS|ASFLAGS|LDFLAGS|LDEXEFLAGS)=(.*)$", re.M)
+COMPILE_FLAG_VARIABLES = re.compile(r"^(?:CPPFLAGS|CFLAGS|CXXFLAGS|ASFLAGS|LDFLAGS|LDEXEFLAGS)=(.*)$", re.MULTILINE)
 
 
 def host_cpu_flag_problems(config_mak, arch):
@@ -1304,8 +1311,8 @@ def audit(target, profile_name):
         case("no unrequested hwaccels", not selected.get("hwaccels"), f"hwaccels: {selected.get('hwaccels')}")
         case(
             "shared libraries only",
-            re.search(r"^CONFIG_SHARED=yes$", config_mak, re.M) is not None
-            and re.search(r"^CONFIG_STATIC=yes$", config_mak, re.M) is None,
+            re.search(r"^CONFIG_SHARED=yes$", config_mak, re.MULTILINE) is not None
+            and re.search(r"^CONFIG_STATIC=yes$", config_mak, re.MULTILINE) is None,
         )
 
     protocols = set(resolved.get("protocols", []))
@@ -1344,7 +1351,7 @@ def audit(target, profile_name):
             "manifest sources",
             all(
                 manifest.get("sources", {}).get(name, {}).get("sha256")
-                == lock["sources"][name]["sha256"]
+                == lock[name]["sha256"]
                 for name in profile["sources"]
             ),
         )
@@ -1401,7 +1408,7 @@ def audit(target, profile_name):
     leaked = build_prefix_leaks(stage)
     case("no absolute build prefix in artifact", not leaked, f"files: {leaked[:10]}")
 
-    version = lock["sources"]["ffmpeg"]["version"]
+    version = lock["ffmpeg"]["version"]
     if artifact == "sdk":
         audit_sdk(case, target, profile_name, config, stage, version)
     elif artifact == "runtime":
@@ -1412,7 +1419,7 @@ def audit(target, profile_name):
 
 
 def license_problems(license_name, config_mak):
-    enabled = set(re.findall(r"^CONFIG_(GPL|NONFREE|VERSION3)=yes$", config_mak, re.M))
+    enabled = set(re.findall(r"^CONFIG_(GPL|NONFREE|VERSION3)=yes$", config_mak, re.MULTILINE))
     problems = [f"CONFIG_{name}=yes" for name in sorted(enabled & {"NONFREE", "VERSION3"})]
     if ("GPL" in enabled) != (license_name == "gpl"):
         problems.append(f"CONFIG_GPL is {'yes' if 'GPL' in enabled else 'off'} for a {license_name} profile")
@@ -1722,7 +1729,7 @@ def library_layout(regular_files, links, platform_name):
 
 
 def elf_dynamic(text):
-    dynamic = {"needed": [], "soname": None, "runpath": [], "rpath": [], "textrel": False}
+    dynamic: dict[str, Any] = {"needed": [], "soname": None, "runpath": [], "rpath": [], "textrel": False}
     for line in text.splitlines():
         match = re.match(r"\s*0x[0-9a-fA-F]+\s+\((\w+)\)\s+(.*)$", line)
         if not match:
@@ -2029,8 +2036,8 @@ def audit_runtime_macho(case, config, path, role, siblings):
         case(f"{name} exports no dav1d or zlib symbols", not leaks, f"exports: {leaks[:10]}")
 
 
-def archive_name(version, tag, target, profile_name):
-    return f"ffmpeg-{version}+{tag}-{target}-{profile_name}"
+def archive_name(version, target, profile_name):
+    return f"ffmpeg-{profile_name}-{version}-{target}"
 
 
 def tar_entry(name, mode, size=0, kind=tarfile.REGTYPE):
@@ -2054,26 +2061,26 @@ def write_deterministic_archive(path, root_name, files, links=None):
         while str(parent) != ".":
             directories.add(f"{root_name}/{parent}")
             parent = parent.parent
-    with part.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
-                for directory in sorted(directories):
-                    archive.addfile(tar_entry(directory, 0o755, kind=tarfile.DIRTYPE))
-                for relative in sorted((*files, *links)):
-                    if relative in links:
-                        info = tar_entry(f"{root_name}/{relative}", 0o777, kind=tarfile.SYMTYPE)
-                        info.linkname = links[relative]
-                        archive.addfile(info)
-                        continue
-                    data, executable = files[relative]
-                    info = tar_entry(f"{root_name}/{relative}", 0o755 if executable else 0o644, len(data))
-                    archive.addfile(info, io.BytesIO(data))
+    with (
+        part.open("wb") as raw,
+        lzma.LZMAFile(raw, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed,
+        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
+    ):
+        for directory in sorted(directories):
+            archive.addfile(tar_entry(directory, 0o755, kind=tarfile.DIRTYPE))
+        for relative in sorted((*files, *links)):
+            if relative in links:
+                info = tar_entry(f"{root_name}/{relative}", 0o777, kind=tarfile.SYMTYPE)
+                info.linkname = links[relative]
+                archive.addfile(info)
+                continue
+            data, executable = files[relative]
+            info = tar_entry(f"{root_name}/{relative}", 0o755 if executable else 0o644, len(data))
+            archive.addfile(info, io.BytesIO(data))
     part.replace(path)
 
 
-def package(target, profile_name, tag):
-    if not valid_release_tag(tag):
-        fail(f"release tag {tag!r} must be a real YYYYMMDD date, YYYYMMDD-rN, or local")
+def package(target, profile_name):
     lock = load_sources()
     profile, _ = load_profile(profile_name)
     config = target_config(profile, target)
@@ -2081,13 +2088,15 @@ def package(target, profile_name, tag):
     if not stage_complete(stage, profile, config["platform"]):
         fail(f"stage {stage} is incomplete; run build first")
     manifest = json.loads((stage / "share" / "ffmpeg-build" / "manifest.json").read_text())
-    version = lock["sources"]["ffmpeg"]["version"]
+    version = lock["ffmpeg"]["version"]
     if manifest.get("profile") != profile_name or manifest.get("target") != target:
         fail(f"stage manifest is for {manifest.get('profile')}/{manifest.get('target')}")
     if manifest.get("sources", {}).get("ffmpeg", {}).get("version") != version:
         fail("stage manifest FFmpeg version disagrees with sources.lock.json")
-    name = archive_name(version, tag, target, profile_name)
-    manifest["release"] = {"tag": tag, "archive": f"{name}.tar.gz"}
+    if not COMMIT.match(manifest.get("producer", {}).get("commit", "")):
+        fail("stage manifest producer commit is not a commit hash")
+    name = archive_name(version, target, profile_name)
+    manifest["release"] = {"archive": f"{name}{ARCHIVE_SUFFIX}"}
     files, links = stage_entries(stage)
     if links and profile["artifact"] != "runtime":
         fail(f"{profile['artifact']} stages carry no symlinks; found {sorted(links)}")
@@ -2095,8 +2104,17 @@ def package(target, profile_name, tag):
         (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
         False,
     )
-    destination = DIST / f"{name}.tar.gz"
+    destination = DIST / f"{name}{ARCHIVE_SUFFIX}"
     write_deterministic_archive(destination, name, files, links)
+    release_manifest = {
+        "schema_version": 1,
+        "product": f"ffmpeg-{profile_name}",
+        "version": version,
+        "target": target,
+        "source_revision": manifest["producer"]["commit"],
+        "sources_lock_sha256": sha256_file(ROOT / "sources.lock.json"),
+    }
+    (DIST / f"{name}{MANIFEST_SUFFIX}").write_text(json.dumps(release_manifest, indent=2, sort_keys=True) + "\n")
     print(f"{sha256_file(destination)}  {destination.name}")
     return destination
 
@@ -2104,7 +2122,7 @@ def package(target, profile_name, tag):
 def parse_archive_name(filename):
     match = ARCHIVE_NAME.match(filename)
     if not match:
-        fail(f"{filename} is not ffmpeg-<upstream>+<tag>-<target>-<profile>.tar.gz")
+        fail(f"{filename} is not ffmpeg-<profile>-<version>-<target>.tar.xz")
     return match.groupdict()
 
 
@@ -2164,11 +2182,11 @@ def qualify(archive_path):
     archive_path = archive_path.resolve()
     parsed = parse_archive_name(archive_path.name)
     lock = load_sources()
-    profile_name, target, tag = parsed["profile"], parsed["target"], parsed["tag"]
+    profile_name, target = parsed["profile"], parsed["target"]
     profile, _ = load_profile(profile_name)
     config = target_config(profile, target)
     require_native_host(config, target)
-    root_name = archive_path.name.removesuffix(".tar.gz")
+    root_name = archive_path.name.removesuffix(ARCHIVE_SUFFIX)
     check = Audit()
     case = check.case
 
@@ -2176,7 +2194,7 @@ def qualify(archive_path):
     if work.parent.exists():
         shutil.rmtree(work.parent)
     work.mkdir(parents=True)
-    with tarfile.open(archive_path, "r:gz") as archive:
+    with tarfile.open(archive_path, "r:xz") as archive:
         members = archive.getmembers()
         problems = archive_member_problems(members, root_name)
         case("archive members are normalized and under the root", not problems, "; ".join(problems[:5]))
@@ -2194,13 +2212,13 @@ def qualify(archive_path):
     case("manifest target matches name", manifest.get("target") == target)
     case(
         "manifest FFmpeg version matches name",
-        manifest.get("sources", {}).get("ffmpeg", {}).get("version") == parsed["upstream"]
-        == lock["sources"]["ffmpeg"]["version"],
+        manifest.get("sources", {}).get("ffmpeg", {}).get("version") == parsed["version"]
+        == lock["ffmpeg"]["version"],
     )
     case(
         "manifest sources match the lock",
         all(
-            manifest.get("sources", {}).get(name, {}).get("sha256") == lock["sources"][name]["sha256"]
+            manifest.get("sources", {}).get(name, {}).get("sha256") == lock[name]["sha256"]
             for name in profile["sources"]
         ),
     )
@@ -2210,7 +2228,7 @@ def qualify(archive_path):
     )
     case(
         "manifest release matches name",
-        manifest.get("release") == {"tag": tag, "archive": archive_path.name},
+        manifest.get("release") == {"archive": archive_path.name},
     )
     missing_notices = [path for path in notice_paths(profile) if not (prefix / path).is_file()]
     case("README and licenses present", not missing_notices, f"missing: {missing_notices}")
@@ -2231,7 +2249,7 @@ def qualify(archive_path):
 
 
 def main():
-    if sys.version_info < (3, 12):
+    if sys.version_info < (3, 12):  # noqa: UP036
         fail(f"build.py needs Python 3.12 or newer for safe tar extraction; this is {platform.python_version()}")
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2239,14 +2257,16 @@ def main():
         command = subparsers.add_parser(name)
         command.add_argument("--target", required=True)
         command.add_argument("--profile", required=True)
-        if name == "package":
-            command.add_argument("--tag", required=True)
+    subparsers.add_parser("version")
     qualify_command = subparsers.add_parser("qualify")
     qualify_command.add_argument("--archive", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
     if args.command == "qualify":
         return qualify(args.archive)
+    if args.command == "version":
+        print(load_sources()["ffmpeg"]["version"])
+        return 0
     profile, _ = load_profile(args.profile)
     target_config(profile, args.target)
     if args.command == "fetch":
@@ -2258,7 +2278,7 @@ def main():
     if args.command == "audit":
         return audit(args.target, args.profile)
     if args.command == "package":
-        package(args.target, args.profile, args.tag)
+        package(args.target, args.profile)
         return 0
     return 2
 

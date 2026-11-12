@@ -3,11 +3,12 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import build  # noqa: E402
+import build
 
 
 class ProfileTests(unittest.TestCase):
@@ -28,8 +29,17 @@ class ProfileTests(unittest.TestCase):
 
     def test_source_pins_have_sha256(self):
         lock = build.load_sources()
-        for source in lock["sources"].values():
+        for source in lock.values():
             self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_sources_lock_follows_the_build_contract(self):
+        raw = json.loads((build.ROOT / "sources.lock.json").read_text())
+        self.assertEqual(raw["schema_version"], 1)
+        names = [source["name"] for source in raw["inputs"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(list(build.load_sources()), names)
+        for source in raw["inputs"]:
+            self.assertTrue("url" in source or "urls" in source, source["name"])
 
     def test_mov_text_configure_alias(self):
         self.assertEqual(build.configure_component("decoders", "mov_text"), "movtext")
@@ -74,23 +84,20 @@ class ProfileTests(unittest.TestCase):
         self.assertIsNone(build.gnu_stack_size("  LOAD 0x0 0x0 0x0 0x10 0x10 R 0x1000\n"))
 
     def test_parse_archive_name(self):
-        parsed = build.parse_archive_name("ffmpeg-9.0.2+20261104-r2-x86_64-unknown-linux-musl-play-sdk.tar.gz")
+        parsed = build.parse_archive_name("ffmpeg-play-sdk-9.0.2-x86_64-unknown-linux-musl.tar.xz")
         self.assertEqual(
             parsed,
-            {"upstream": "9.0.2", "tag": "20261104-r2", "target": "x86_64-unknown-linux-musl", "profile": "play-sdk"},
+            {"profile": "play-sdk", "version": "9.0.2", "target": "x86_64-unknown-linux-musl"},
         )
-        parsed = build.parse_archive_name("ffmpeg-9.0.2+local-aarch64-apple-darwin-tools.tar.gz")
+        parsed = build.parse_archive_name("ffmpeg-tools-9.0.2-aarch64-apple-darwin.tar.xz")
         self.assertEqual(parsed["target"], "aarch64-apple-darwin")
-        with self.assertRaises(SystemExit):
-            build.parse_archive_name("ffmpeg-9.0.2-aarch64-apple-darwin-tools.tar.gz")
-
-    def test_release_tag_format(self):
-        for tag in ("20261104", "20261104-r2", "local"):
-            self.assertTrue(build.RELEASE_TAG.match(tag), tag)
-        for tag in ("2026-11-04", "20261104-2", "latest", "20261104+x"):
-            self.assertFalse(build.RELEASE_TAG.match(tag), tag)
-        self.assertTrue(build.valid_release_tag("20261104-r2"))
-        self.assertFalse(build.valid_release_tag("20269999"))
+        for name in (
+            "ffmpeg-9.0.2+20261104-aarch64-apple-darwin-tools.tar.gz",
+            "ffmpeg-tools-9.0.2-aarch64-apple-darwin.tar.gz",
+            "ffmpeg-9.0.2-aarch64-apple-darwin.tar.xz",
+        ):
+            with self.assertRaises(SystemExit):
+                build.parse_archive_name(name)
 
     def test_absolute_build_tree_marker(self):
         self.assertTrue(build.ABSOLUTE_BUILD_TREE.search(b"/home/runner/x/.work/build/a.c"))
@@ -159,8 +166,8 @@ class StageTests(unittest.TestCase):
 
     def test_deterministic_archive(self):
         files = {"bin/ffmpeg": (b"binary", True), "README": (b"readme", False)}
-        first = self.stage / "first.tar.gz"
-        second = self.stage / "second.tar.gz"
+        first = self.stage / "first.tar.xz"
+        second = self.stage / "second.tar.xz"
         build.write_deterministic_archive(first, "root", files)
         build.write_deterministic_archive(second, "root", dict(reversed(list(files.items()))))
         self.assertEqual(first.read_bytes(), second.read_bytes())
@@ -170,6 +177,48 @@ class StageTests(unittest.TestCase):
         self.assertEqual(build.archive_member_problems(members, "root"), [])
         self.assertEqual(members[3].mode, 0o755)
         self.assertEqual(members[2].mode, 0o644)
+
+    def test_package_writes_archive_and_release_manifest(self):
+        commit = "e" * 40
+        target = "aarch64-apple-darwin"
+        manifest = {
+            "profile": "tools",
+            "target": target,
+            "sources": {"ffmpeg": {"version": build.load_sources()["ffmpeg"]["version"]}},
+            "producer": {"commit": commit},
+        }
+        (self.stage / "share" / "ffmpeg-build").mkdir(parents=True)
+        (self.stage / "share" / "ffmpeg-build" / "manifest.json").write_text(json.dumps(manifest))
+        (self.stage / "bin").mkdir()
+        (self.stage / "bin" / "ffmpeg").write_bytes(b"exe")
+        dist = pathlib.Path(self.temp.name) / "dist"
+        with (
+            mock.patch.object(build, "DIST", dist),
+            mock.patch.object(build, "build_paths", return_value=(self.stage, None, None)),
+            mock.patch.object(build, "stage_complete", return_value=True),
+        ):
+            archive = build.package(target, "tools")
+        version = build.load_sources()["ffmpeg"]["version"]
+        self.assertEqual(archive.name, f"ffmpeg-tools-{version}-{target}.tar.xz")
+        sidecar = json.loads((dist / f"ffmpeg-tools-{version}-{target}.manifest.json").read_text())
+        self.assertEqual(
+            sidecar,
+            {
+                "schema_version": 1,
+                "product": "ffmpeg-tools",
+                "version": version,
+                "target": target,
+                "source_revision": commit,
+                "sources_lock_sha256": build.sha256_file(build.ROOT / "sources.lock.json"),
+            },
+        )
+        with build.tarfile.open(archive, "r:xz") as opened:
+            names = opened.getnames()
+            handle = opened.extractfile(f"ffmpeg-tools-{version}-{target}/share/ffmpeg-build/manifest.json")
+            assert handle is not None
+            inner = json.load(handle)
+        self.assertIn(f"ffmpeg-tools-{version}-{target}/bin/ffmpeg", names)
+        self.assertEqual(inner["release"], {"archive": archive.name})
 
     def test_archive_member_problems(self):
         escape = build.tarfile.TarInfo("root/../evil")
@@ -266,7 +315,7 @@ class RuntimeProfileTests(unittest.TestCase):
         self.assertIn("--extra-ldsoflags=-Wl,-rpath,@loader_path", args)
 
     def test_runtime_archive_name(self):
-        parsed = build.parse_archive_name("ffmpeg-9.0.2+20261107-aarch64-unknown-linux-musl-runtime.tar.gz")
+        parsed = build.parse_archive_name("ffmpeg-runtime-9.0.2-aarch64-unknown-linux-musl.tar.xz")
         self.assertEqual(parsed["profile"], "runtime")
         self.assertEqual(parsed["target"], "aarch64-unknown-linux-musl")
 
@@ -412,8 +461,8 @@ class FixturesProfileTests(unittest.TestCase):
 
     def test_fixtures_archive_is_named_for_its_profile(self):
         self.assertEqual(
-            build.archive_name("9.0.2", "20261111", "x86_64-unknown-linux-musl", "fixtures"),
-            "ffmpeg-9.0.2+20261111-x86_64-unknown-linux-musl-fixtures",
+            build.archive_name("9.0.2", "x86_64-unknown-linux-musl", "fixtures"),
+            "ffmpeg-fixtures-9.0.2-x86_64-unknown-linux-musl",
         )
 
 
@@ -697,8 +746,8 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_archive_round_trips_soname_links(self):
         files = {"lib/libavcodec.so.63.4.100": (b"elf", True), "bin/ffmpeg": (b"exe", True)}
-        first = self.root / "first.tar.gz"
-        second = self.root / "second.tar.gz"
+        first = self.root / "first.tar.xz"
+        second = self.root / "second.tar.xz"
         build.write_deterministic_archive(first, "root", files, SONAME_CHAIN)
         build.write_deterministic_archive(second, "root", dict(reversed(list(files.items()))), dict(reversed(list(SONAME_CHAIN.items()))))
         self.assertEqual(first.read_bytes(), second.read_bytes())

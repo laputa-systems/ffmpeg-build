@@ -7,12 +7,12 @@
 ```sh
 python3 build.py build --target aarch64-apple-darwin --profile runtime
 python3 build.py audit --target aarch64-apple-darwin --profile runtime
-python3 build.py package --target aarch64-apple-darwin --profile runtime --tag local
-python3 build.py qualify --archive dist/ffmpeg-9.0.2+local-aarch64-apple-darwin-runtime.tar.gz
+python3 build.py package --target aarch64-apple-darwin --profile runtime
+python3 build.py qualify --archive dist/ffmpeg-runtime-9.0.2-aarch64-apple-darwin.tar.xz
 
 scripts/linux-build.sh x86_64-unknown-linux-musl runtime
-python3 build.py package --target x86_64-unknown-linux-musl --profile runtime --tag local
-scripts/linux-qualify.sh dist/ffmpeg-9.0.2+local-x86_64-unknown-linux-musl-runtime.tar.gz
+python3 build.py package --target x86_64-unknown-linux-musl --profile runtime
+scripts/linux-qualify.sh dist/ffmpeg-runtime-9.0.2-x86_64-unknown-linux-musl.tar.xz
 ```
 
 On Linux, `scripts/linux-build.sh` runs `build` and `audit` in the `build` image, then copies the stage out and runs `tests/tools-workflows.sh` in the `runtime-libva` image: a clean Alpine with `bash`, `file`, `python3`, and the system `libva`, with the prefix mounted read-only and no `/work`. `scripts/linux-qualify.sh` qualifies runtime archives in the `build` image, because the consumer check needs a compiler.
@@ -41,7 +41,7 @@ Configure uses `--enable-shared --disable-static`. dav1d and zlib build from `so
 | other dependencies | musl `libc.musl-<arch>.so.1`, `libva.so.2`, `libva-drm.so.2` | `/usr/lib/libSystem.B.dylib` and the frameworks above |
 | program interpreter | `/lib/ld-musl-<arch>.so.1` | dyld |
 
-On Linux, `$ORIGIN` reaches the linker through response files in the build directory (`ld-program.rsp`, `ld-library.rsp`), because FFmpeg's makefiles expand dollar signs in the link flags. Programs and libraries carry a 2 MiB `PT_GNU_STACK`: musl takes its default thread stack from the main program and the libraries loaded at startup, and FFmpeg's threads overflow musl's 128 KiB default. Libraries are stripped by `make install`, programs by `build.py`; on macOS every program and library is ad-hoc signed after stripping.
+On Linux, `$ORIGIN` reaches the linker through response files in the build directory (`ld-program.rsp`, `ld-library.rsp`), because FFmpeg's makefiles expand dollar signs in the link flags. Programs and libraries carry a 2 MiB `PT_GNU_STACK`: musl takes its default thread stack from the main program and the libraries loaded at startup, and FFmpeg's threads overflow musl's 128 KiB default. Libraries are stripped by the FFmpeg install step, programs by `build.py`; on macOS every program and library is ad-hoc signed after stripping.
 
 Consumers on Linux need the system `libva` and `libva-drm` (Alpine package `libva`), because libavutil links VA-API directly. Nothing else outside the archive is required.
 

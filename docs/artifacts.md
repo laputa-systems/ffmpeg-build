@@ -1,21 +1,23 @@
 # Artifacts
 
-Each release publishes ten archives, plus `SHA256SUMS` and `release.json`: three targets for each of the three profiles, and the test-only `x86_64-unknown-linux-musl-fixtures` archive.
+Each release publishes ten archives, each with a `.manifest.json`, plus `SHA256SUMS`: three targets for each of the three profiles, and the test-only `ffmpeg-fixtures` archive for `x86_64-unknown-linux-musl`.
 
 The `fixtures` archive is a GPL generator for Play's fixture gate, not a runtime. See `docs/fixtures.md`.
 
 ## Names
 
 ```text
-ffmpeg-<upstream>+<tag>-<target>-<profile>.tar.gz
+ffmpeg-<profile>-<version>-<target>.tar.xz
+ffmpeg-<profile>-<version>-<target>.manifest.json
 ```
 
-- `<upstream>` is the FFmpeg version from `sources.lock.json`, for example `9.0.2`.
-- `<tag>` is the producer release: `YYYYMMDD` for the first release of a UTC day, `YYYYMMDD-rN` for later revisions, or `local` for a local package.
+- `ffmpeg-<profile>` is the product: `ffmpeg-runtime`, `ffmpeg-play-sdk`, `ffmpeg-tools`, or the test-only `ffmpeg-fixtures`. `runtime` replaces the other two once their consumers switch.
+- `<version>` is the FFmpeg version from `sources.lock.json`, for example `9.0.2`.
 - `<target>` is `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl`.
-- `<profile>` is `runtime`, `play-sdk`, or `tools`. `runtime` replaces the other two once their consumers switch.
 
-The archive has a single top-level directory, named like the file without `.tar.gz`.
+The archive has a single top-level directory, named like the file without `.tar.xz`.
+
+The `.manifest.json` beside each archive holds `schema_version` (1), `product`, `version`, `target`, `source_revision` (the commit the stage was built from), and `sources_lock_sha256`. Releases are tagged `release-<commit>`, so the file names carry no date.
 
 ## Layout
 
@@ -71,7 +73,7 @@ SDK archives keep their symbols. Tools and runtime executables and runtime libra
 | --- | --- |
 | `contract` | `1` |
 | `profile`, `target` | as in the archive name |
-| `release` | `{tag, archive}`, written by `package` |
+| `release` | `{archive}`, written by `package` |
 | `sources` | version, URL, and SHA-256 of FFmpeg, dav1d, and zlib |
 | `producer` | repository and commit |
 | `configure_args`, `configure` | requested arguments and FFmpeg's recorded configuration |
@@ -101,16 +103,17 @@ Nothing in an artifact contains the absolute build root. FFmpeg is configured wi
 ## Package and qualify
 
 ```sh
-python3 build.py package --target aarch64-apple-darwin --profile play-sdk --tag local
-python3 build.py package --target aarch64-apple-darwin --profile tools --tag local
-python3 build.py package --target aarch64-apple-darwin --profile runtime --tag local
-python3 build.py qualify --archive dist/ffmpeg-9.0.2+local-aarch64-apple-darwin-play-sdk.tar.gz
-python3 build.py qualify --archive dist/ffmpeg-9.0.2+local-aarch64-apple-darwin-tools.tar.gz
-python3 build.py qualify --archive dist/ffmpeg-9.0.2+local-aarch64-apple-darwin-runtime.tar.gz
-scripts/linux-qualify.sh dist/ffmpeg-9.0.2+local-x86_64-unknown-linux-musl-play-sdk.tar.gz
+python3 build.py package --target aarch64-apple-darwin --profile play-sdk
+python3 build.py package --target aarch64-apple-darwin --profile tools
+python3 build.py package --target aarch64-apple-darwin --profile runtime
+python3 build.py qualify --archive dist/ffmpeg-play-sdk-9.0.2-aarch64-apple-darwin.tar.xz
+python3 build.py qualify --archive dist/ffmpeg-tools-9.0.2-aarch64-apple-darwin.tar.xz
+python3 build.py qualify --archive dist/ffmpeg-runtime-9.0.2-aarch64-apple-darwin.tar.xz
+scripts/linux-qualify.sh dist/ffmpeg-play-sdk-9.0.2-x86_64-unknown-linux-musl.tar.xz
+make build verify TARGET=aarch64-apple-darwin
 ```
 
-`package` reads only the stage, and it runs on any host. It writes the archive with Python `tarfile`. Entries are sorted, owned by uid and gid 0 with no user or group names, and have mtime 0. Directories are mode 0755, executables 0755, symlinks 0777, and other files 0644. `package` fails on any symlink in an SDK or tools stage, and on any runtime symlink that is outside `lib/`, has an absolute target or a target containing `/`, dangles, or loops. The gzip header has mtime 0 and no file name, so the same stage always gives the same bytes.
+`package` reads only the stage, and it runs on any host. It writes the archive with Python `tarfile`. Entries are sorted, owned by uid and gid 0 with no user or group names, and have mtime 0. Directories are mode 0755, executables 0755, symlinks 0777, and other files 0644. `package` fails on any symlink in an SDK or tools stage, and on any runtime symlink that is outside `lib/`, has an absolute target or a target containing `/`, dangles, or loops. The xz stream has no timestamp or file name, so the same stage always gives the same bytes. `package` also writes the `.manifest.json` beside the archive.
 
 `qualify` must run on the target platform. On Linux, `scripts/linux-qualify.sh` runs it in the `build` image for SDK and runtime archives and the `runtime` image for tools. It checks:
 

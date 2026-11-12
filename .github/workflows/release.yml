@@ -1,18 +1,13 @@
-name: Release
+name: release
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Release tag (YYYYMMDD or YYYYMMDD-rN); empty uses the UTC date
-        required: false
-        default: ''
 
 permissions: {}
 
 concurrency:
-  group: release
-  cancel-in-progress: false
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -22,56 +17,47 @@ env:
   XCODE_APP: /Applications/Xcode_27.1.app
 
 jobs:
-  prepare:
-    name: Prepare
-    runs-on: ubuntu-latest
+  preflight:
+    name: Validate release ref
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      upstream: ${{ steps.upstream.outputs.upstream }}
+      default_branch: ${{ steps.ref.outputs.default_branch }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
       - name: Require the default branch
-        run: |
-          if [ "$GITHUB_REF" != refs/heads/main ]; then
-            echo "releases are cut from main, not $GITHUB_REF" >&2
-            exit 1
-          fi
-
-      - name: Resolve release tag
-        id: tag
-        env:
-          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
-        run: python3 .github/scripts/resolve_release.py
-
-      - name: Refuse an existing release early
+        id: ref
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists; rerun with a new YYYYMMDD-rN tag" >&2
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" ]]; then
+            echo "Release dispatch rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
             exit 1
           fi
+          echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Read upstream version
-        id: upstream
-        run: |
-          upstream=$(python3 -c 'import json; print(json.load(open("sources.lock.json"))["sources"]["ffmpeg"]["version"])')
-          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+        id: version
+        run: echo "version=$(python3 build.py version)" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
         run: python3 -m unittest discover -s tests
 
   fixtures:
     name: Fixtures
-    runs-on: ubuntu-latest
+    needs: preflight
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -79,6 +65,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Generate fixtures with Alpine FFmpeg 9.0.2
         run: scripts/linux-fixtures.sh
@@ -89,27 +76,39 @@ jobs:
           path: .work/fixtures
           if-no-files-found: error
 
-  build-macos:
-    name: Build aarch64-apple-darwin
-    needs: [prepare, fixtures]
-    runs-on: xcode-27
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [preflight, fixtures]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: xcode-27
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-26.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-26.04-arm
     env:
-      TARGET: aarch64-apple-darwin
-      TAG: ${{ needs.prepare.outputs.tag }}
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Select Xcode
+        if: matrix.target == 'aarch64-apple-darwin'
         run: |
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
 
       - name: Install build tools
+        if: matrix.target == 'aarch64-apple-darwin'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -119,7 +118,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .work/cache/sources
-          key: ffmpeg-sources-${{ env.TARGET }}-xcode-27.1-${{ hashFiles('sources.lock.json', 'profiles/*.json', 'build.py', 'scripts/*.sh', 'docker/Dockerfile') }}
+          key: ffmpeg-sources-${{ matrix.target }}-${{ matrix.runner }}-${{ hashFiles('sources.lock.json', 'profiles/*.json', 'build.py', 'scripts/*.sh', 'docker/Dockerfile') }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -127,76 +126,26 @@ jobs:
           path: .work/fixtures
 
       - name: Build, audit, and package
+        run: make build TARGET="$TARGET"
+
+      - name: Run tools workflows
+        if: matrix.target == 'aarch64-apple-darwin'
         run: |
-          for profile in play-sdk tools runtime; do
-            python3 build.py build --target "$TARGET" --profile "$profile"
-            python3 build.py audit --target "$TARGET" --profile "$profile"
-            python3 build.py package --target "$TARGET" --profile "$profile" --tag "$TAG"
-          done
           tests/tools-workflows.sh ".work/stage/$TARGET/tools"
           TOOLS_WORK=.work/tmp/tools-workflows-runtime tests/tools-workflows.sh ".work/stage/$TARGET/runtime"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: archives-aarch64-apple-darwin
-          path: dist/*.tar.gz
-          if-no-files-found: error
-
-  build-linux:
-    name: Build ${{ matrix.target }}
-    needs: [prepare, fixtures]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
-    env:
-      TARGET: ${{ matrix.target }}
-      TAG: ${{ needs.prepare.outputs.tag }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Cache sources
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .work/cache/sources
-          key: ffmpeg-sources-${{ matrix.target }}-${{ hashFiles('sources.lock.json', 'profiles/*.json', 'build.py', 'scripts/*.sh', 'docker/Dockerfile') }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: fixtures
-          path: .work/fixtures
-
-      - name: Build, audit, and package
-        run: |
-          profiles="play-sdk tools runtime"
-          if [ "$TARGET" = x86_64-unknown-linux-musl ]; then
-            profiles="$profiles fixtures"
-          fi
-          for profile in $profiles; do
-            scripts/linux-build.sh "$TARGET" "$profile"
-            python3 build.py package --target "$TARGET" --profile "$profile" --tag "$TAG"
-          done
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
           name: archives-${{ matrix.target }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.xz
+            dist/*.manifest.json
           if-no-files-found: error
 
   assemble:
     name: Assemble
-    needs: [prepare, build-macos, build-linux]
-    runs-on: ubuntu-latest
+    needs: [preflight, build]
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -204,6 +153,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -211,9 +161,10 @@ jobs:
           path: .work/artifacts
 
       - name: Assemble release assets
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          python3 .github/scripts/assemble_release.py .work/artifacts release \
-            "${{ needs.prepare.outputs.upstream }}" "${{ needs.prepare.outputs.tag }}" "$GITHUB_SHA"
+          python3 .github/scripts/assemble_release.py .work/artifacts release "$VERSION" "$GITHUB_SHA"
           (cd release && sha256sum -c SHA256SUMS)
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -222,22 +173,37 @@ jobs:
           path: release
           if-no-files-found: error
 
-  qualify-macos:
-    name: Qualify aarch64-apple-darwin
-    needs: [prepare, assemble]
-    runs-on: xcode-27
+  verify:
+    name: Verify ${{ matrix.target }}
+    needs: [preflight, assemble]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: xcode-27
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-26.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-26.04-arm
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Select Xcode
+        if: matrix.target == 'aarch64-apple-darwin'
         run: sudo xcode-select -s "$XCODE_APP"
 
       - name: Install pkg-config
+        if: matrix.target == 'aarch64-apple-darwin'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -253,61 +219,50 @@ jobs:
           name: fixtures
           path: .work/fixtures
 
-      - name: Qualify published bytes
-        run: |
-          (cd dist && shasum -a 256 -c SHA256SUMS)
-          for archive in dist/*-aarch64-apple-darwin-*.tar.gz; do
-            python3 build.py qualify --archive "$archive"
-          done
+      - name: Check release bytes on macOS
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: (cd dist && shasum -a 256 -c SHA256SUMS)
 
-  qualify-linux:
-    name: Qualify ${{ matrix.target }}
-    needs: [prepare, assemble]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - name: Check release bytes on Linux
+        if: matrix.target != 'aarch64-apple-darwin'
+        run: (cd dist && sha256sum -c SHA256SUMS)
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release
-          path: dist
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: fixtures
-          path: .work/fixtures
-
-      - name: Qualify published bytes
-        run: |
-          (cd dist && sha256sum -c SHA256SUMS)
-          for archive in dist/*-${{ matrix.target }}-*.tar.gz; do
-            scripts/linux-qualify.sh "$archive"
-          done
+      - name: Verify published bytes
+        run: make verify TARGET="$TARGET"
 
   publish:
-    name: Publish
-    needs: [prepare, qualify-macos, qualify-linux]
-    runs-on: ubuntu-latest
+    name: Create pre-release
+    needs: [preflight, assemble, verify]
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: write
-    env:
-      TAG: ${{ needs.prepare.outputs.tag }}
-      GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Recheck release ref and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
+          RELEASE_TAG: release-${{ github.sha }}
+        run: |
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" || "$DEFAULT_BRANCH" != "$default_branch" ]]; then
+            echo "Release publication rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" 2>&1); then
+            echo "Release publication rejected: tag $RELEASE_TAG already exists; inspect it before proceeding" >&2
+            exit 1
+          else
+            if [[ "$response" != *"HTTP 404"* ]]; then
+              printf 'Could not verify that tag %s is absent: %s\n' "$RELEASE_TAG" "$response" >&2
+              exit 1
+            fi
+          fi
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
@@ -316,37 +271,75 @@ jobs:
       - name: Check release bytes
         run: |
           (cd release && sha256sum -c SHA256SUMS)
-          test "$(python3 -c 'import json; print(json.load(open("release/release.json"))["commit"])')" = "$GITHUB_SHA"
-          test "$(find release -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq "$(python3 -c 'import json; print(len(json.load(open("release/release.json"))["assets"]))')"
+          sed 's/^[0-9a-f]*  //' release/SHA256SUMS | LC_ALL=C sort -c
+          test "$(find release -maxdepth 1 -type f | wc -l)" -eq "$(($(wc -l < release/SHA256SUMS) + 1))"
 
-      - name: Refuse to overwrite an existing release
+      - name: Create release tag at triggering SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: release-${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
         run: |
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists; rerun with a new YYYYMMDD-rN tag" >&2
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" || "$DEFAULT_BRANCH" != "$default_branch" ]]; then
+            echo "Release publication rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" 2>&1); then
+            echo "Release publication rejected: tag $RELEASE_TAG already exists; inspect it before proceeding" >&2
+            exit 1
+          elif [[ "$response" != *"HTTP 404"* ]]; then
+            printf 'Could not verify that tag %s is absent: %s\n' "$RELEASE_TAG" "$response" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA" 2>&1); then
+            echo "Created $RELEASE_TAG at $GITHUB_SHA"
+          else
+            printf 'Could not create release tag %s at %s: %s\n' "$RELEASE_TAG" "$GITHUB_SHA" "$response" >&2
             exit 1
           fi
 
-      - name: Publish
+      - name: Write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          upstream=$(python3 -c 'import json; print(json.load(open("release/release.json"))["upstream"])')
-          cat > notes.md <<EOF
-          FFmpeg ${upstream} built from pinned sources at ${GITHUB_SHA}.
+          notes="$RUNNER_TEMP/release-notes.md"
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 \
+            --json tagName --jq '.[0].tagName // ""')
+          if [[ -z "$previous" ]]; then
+            printf 'Initial release at %s.\n' "$GITHUB_SHA" > "$notes"
+            exit 0
+          fi
+          compare="repos/$GITHUB_REPOSITORY/compare/$previous...$GITHUB_SHA"
+          status=$(gh api "$compare" --jq '.status')
+          if [[ "$status" != ahead ]]; then
+            printf 'Release notes rejected: %s is %s relative to %s, expected ahead\n' "$GITHUB_SHA" "$status" "$previous" >&2
+            exit 1
+          fi
+          {
+            printf '## Changes since %s\n\n' "$previous"
+            gh api --paginate "$compare?per_page=100" --jq '.commits[] | "- \(.sha[0:12]) \(.commit.message | split("\n")[0])"'
+            printf '\n**Full changelog**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous" "$GITHUB_SHA"
+          } > "$notes"
 
-          - \`play-sdk\`: static playback SDK (headers, static libraries, relocatable pkg-config) for Player. LGPL v2.1 or later.
-          - \`tools\`: static, headless \`ffmpeg\` and \`ffprobe\` for local postprocessing. GPL v2 or later. No network protocols; lavfi is the only device.
-          - \`runtime\`: \`ffmpeg\`, \`ffprobe\`, and the shared libav* libraries, headers, and pkg-config files they run on; the union of \`tools\` and \`play-sdk\`. GPL v2 or later. No network protocols; lavfi is the only device.
-          - \`fixtures\` (x86_64-unknown-linux-musl only): test-only \`ffmpeg\` and \`ffprobe\` with the x264, x265, SVT-AV1, libvpx, LAME, and Opus encoders, for generating test fixtures. GPL v2 or later. Not for distribution with a player.
-
-          Targets: aarch64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl.
-          Verify every archive against SHA256SUMS before use. release.json records the tag, commit, and asset digests.
-          EOF
-          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "$TAG" --notes-file notes.md release/*
+      - name: Create pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: release-${{ github.sha }}
+        run: |
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --verify-tag \
+            --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" release/*
 
       - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: release-${{ github.sha }}
         run: |
           mkdir -p published
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --dir published
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir published
           (cd published && sha256sum -c SHA256SUMS)
           cmp release/SHA256SUMS published/SHA256SUMS
-          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false
