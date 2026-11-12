@@ -2,6 +2,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -9,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import build
+from bootstrap import hashing, release
 
 
 class ProfileTests(unittest.TestCase):
@@ -30,7 +32,7 @@ class ProfileTests(unittest.TestCase):
     def test_source_pins_have_sha256(self):
         lock = build.load_sources()
         for source in lock.values():
-            self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(source.sha256, r"^[0-9a-f]{64}$")
 
     def test_sources_lock_follows_the_build_contract(self):
         raw = json.loads((build.ROOT / "sources.lock.json").read_text())
@@ -40,6 +42,12 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(list(build.load_sources()), names)
         for source in raw["inputs"]:
             self.assertTrue("url" in source or "urls" in source, source["name"])
+
+    def test_buildlib_pin_matches_the_lock(self):
+        pyproject = tomllib.loads((build.ROOT / "pyproject.toml").read_text())
+        pinned = build.load_sources()["laputa-buildlib"]
+        self.assertIn(f"laputa-buildlib=={pinned.version}", pyproject["project"]["dependencies"])
+        self.assertTrue(pinned.extra["filename"].startswith(f"laputa_buildlib-{pinned.version}-"))
 
     def test_mov_text_configure_alias(self):
         self.assertEqual(build.configure_component("decoders", "mov_text"), "movtext")
@@ -164,27 +172,13 @@ class StageTests(unittest.TestCase):
         dirty.write_bytes(str(build.ROOT).encode() + b"/.work/build/x.c")
         self.assertEqual(build.build_prefix_leaks(self.stage), ["lib/dirty.a"])
 
-    def test_deterministic_archive(self):
-        files = {"bin/ffmpeg": (b"binary", True), "README": (b"readme", False)}
-        first = self.stage / "first.tar.xz"
-        second = self.stage / "second.tar.xz"
-        build.write_deterministic_archive(first, "root", files)
-        build.write_deterministic_archive(second, "root", dict(reversed(list(files.items()))))
-        self.assertEqual(first.read_bytes(), second.read_bytes())
-        with build.tarfile.open(first) as archive:
-            members = archive.getmembers()
-        self.assertEqual([member.name for member in members], ["root", "root/bin", "root/README", "root/bin/ffmpeg"])
-        self.assertEqual(build.archive_member_problems(members, "root"), [])
-        self.assertEqual(members[3].mode, 0o755)
-        self.assertEqual(members[2].mode, 0o644)
-
     def test_package_writes_archive_and_release_manifest(self):
         commit = "e" * 40
         target = "aarch64-apple-darwin"
         manifest = {
             "profile": "tools",
             "target": target,
-            "sources": {"ffmpeg": {"version": build.load_sources()["ffmpeg"]["version"]}},
+            "sources": {"ffmpeg": {"version": build.load_sources()["ffmpeg"].version}},
             "producer": {"commit": commit},
         }
         (self.stage / "share" / "ffmpeg-build").mkdir(parents=True)
@@ -198,7 +192,7 @@ class StageTests(unittest.TestCase):
             mock.patch.object(build, "stage_complete", return_value=True),
         ):
             archive = build.package(target, "tools")
-        version = build.load_sources()["ffmpeg"]["version"]
+        version = build.load_sources()["ffmpeg"].version
         self.assertEqual(archive.name, f"ffmpeg-tools-{version}-{target}.tar.xz")
         sidecar = json.loads((dist / f"ffmpeg-tools-{version}-{target}.manifest.json").read_text())
         self.assertEqual(
@@ -209,7 +203,7 @@ class StageTests(unittest.TestCase):
                 "version": version,
                 "target": target,
                 "source_revision": commit,
-                "sources_lock_sha256": build.sha256_file(build.ROOT / "sources.lock.json"),
+                "sources_lock_sha256": hashing.sha256_file(build.ROOT / "sources.lock.json"),
             },
         )
         with build.tarfile.open(archive, "r:xz") as opened:
@@ -461,8 +455,8 @@ class FixturesProfileTests(unittest.TestCase):
 
     def test_fixtures_archive_is_named_for_its_profile(self):
         self.assertEqual(
-            build.archive_name("9.0.2", "x86_64-unknown-linux-musl", "fixtures"),
-            "ffmpeg-fixtures-9.0.2-x86_64-unknown-linux-musl",
+            release.archive_name("ffmpeg-fixtures", "9.0.2", "x86_64-unknown-linux-musl"),
+            "ffmpeg-fixtures-9.0.2-x86_64-unknown-linux-musl.tar.xz",
         )
 
 
@@ -714,15 +708,13 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertTrue((self.stage / "include" / "libavutil" / "avutil.h").is_file())
         self.assertFalse((self.stage / "share" / "man").exists())
 
-    def test_stage_entries_keep_soname_links(self):
+    def test_stage_links_keep_soname_links(self):
         self.write("lib/libavcodec.so.63.4.100", b"elf")
         for link, target in SONAME_CHAIN.items():
             self.link(link, target)
-        files, links = build.stage_entries(self.stage)
-        self.assertEqual(files, {"lib/libavcodec.so.63.4.100": (b"elf", False)})
-        self.assertEqual(links, SONAME_CHAIN)
+        self.assertEqual(build.stage_links(self.stage), SONAME_CHAIN)
 
-    def test_stage_entries_reject_unsafe_links(self):
+    def test_stage_links_reject_unsafe_links(self):
         outside = self.write("../outside.so")
         cases = {
             "lib/libz.so": str(outside),
@@ -735,24 +727,23 @@ class RuntimeStageTests(unittest.TestCase):
             with self.subTest(link=link):
                 self.link(link, target)
                 with self.assertRaises(SystemExit):
-                    build.stage_entries(self.stage)
+                    build.stage_links(self.stage)
                 (self.stage / link).unlink()
 
-    def test_stage_entries_reject_symlinked_directory(self):
+    def test_stage_links_reject_symlinked_directory(self):
         self.write("lib/real/libavcodec.so.63.4.100")
         self.link("lib/linked", "real")
         with self.assertRaises(SystemExit):
-            build.stage_entries(self.stage)
+            build.stage_links(self.stage)
 
     def test_archive_round_trips_soname_links(self):
-        files = {"lib/libavcodec.so.63.4.100": (b"elf", True), "bin/ffmpeg": (b"exe", True)}
-        first = self.root / "first.tar.xz"
-        second = self.root / "second.tar.xz"
-        build.write_deterministic_archive(first, "root", files, SONAME_CHAIN)
-        build.write_deterministic_archive(second, "root", dict(reversed(list(files.items()))), dict(reversed(list(SONAME_CHAIN.items()))))
-        self.assertEqual(first.read_bytes(), second.read_bytes())
+        self.write("lib/libavcodec.so.63.4.100", b"elf")
+        self.write("bin/ffmpeg", b"exe")
+        for link, target in SONAME_CHAIN.items():
+            self.link(link, target)
+        archive_path = release.create_archive(self.stage, self.root / "first.tar.xz", mtime=0, prefix="root")
         destination = self.root / "out"
-        with build.tarfile.open(first) as archive:
+        with build.tarfile.open(archive_path) as archive:
             members = archive.getmembers()
             self.assertEqual(build.archive_member_problems(members, "root"), [])
             archive.extractall(destination, filter="data")
@@ -811,7 +802,7 @@ class RuntimeStageTests(unittest.TestCase):
             "file": "lib/libavcodec.so.63.4.100",
             "links": sorted(SONAME_CHAIN),
             "soname": "libavcodec.so.63",
-            "sha256": build.sha256_file(real),
+            "sha256": hashing.sha256_file(real),
         }
         libraries = {library: dict(entry) for library in build.RUNTIME_LIBRARIES}
         self.assertEqual(build.extracted_library_problems(self.stage, libraries, "linux"), [])

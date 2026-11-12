@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import sys
 import tarfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from bootstrap import hashing, release
 
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
 PROFILES = ("play-sdk", "tools", "runtime")
@@ -25,14 +27,6 @@ def expected_assets(version: str) -> list[str]:
     )
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def archive_commit(path: Path) -> str | None:
     member = f"{path.name.removesuffix(ARCHIVE_SUFFIX)}/share/ffmpeg-build/manifest.json"
     with tarfile.open(path, "r:xz") as archive:
@@ -48,14 +42,13 @@ def archive_commit(path: Path) -> str | None:
 def check_manifest(path: Path, stem: str, version: str, commit: str, lock_sha256: str) -> None:
     manifest = json.loads(path.read_text())
     profile, _, target = stem.removeprefix("ffmpeg-").partition(f"-{version}-")
-    expected = {
-        "schema_version": 1,
-        "product": f"ffmpeg-{profile}",
-        "version": version,
-        "target": target,
-        "source_revision": commit,
-        "sources_lock_sha256": lock_sha256,
-    }
+    expected = release.build_manifest(
+        product=f"ffmpeg-{profile}",
+        version=version,
+        target=target,
+        source_revision=commit,
+        sources_lock_sha256=lock_sha256,
+    )
     for key, value in expected.items():
         if manifest.get(key) != value:
             raise ValueError(f"{path.name}: {key} is {manifest.get(key)!r}, expected {value!r}")
@@ -80,7 +73,7 @@ def assemble(found: list[Path], destination: Path, version: str, commit: str, lo
     destination.mkdir(parents=True, exist_ok=False)
     for name in wanted:
         shutil.copyfile(by_name[name], destination / name)
-    (destination / "SHA256SUMS").write_text("".join(f"{sha256(destination / name)}  {name}\n" for name in wanted))
+    release.write_sha256sums(destination)
     return wanted
 
 
@@ -90,7 +83,7 @@ def main() -> int:
         return 2
     source, destination, version, commit = sys.argv[1:]
     try:
-        lock_sha256 = sha256(Path("sources.lock.json"))
+        lock_sha256 = hashing.sha256_file(Path("sources.lock.json"))
         assets = assemble(
             sorted(p for p in Path(source).rglob("*") if p.name.endswith((ARCHIVE_SUFFIX, MANIFEST_SUFFIX))),
             Path(destination),
@@ -98,7 +91,7 @@ def main() -> int:
             commit,
             lock_sha256,
         )
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, release.ReleaseError) as error:
         print(f"assemble failed: {error}", file=sys.stderr)
         return 1
     print("\n".join(assets))
