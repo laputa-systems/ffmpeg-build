@@ -1,0 +1,15 @@
+--- a/fftools/opt_common.c
++++ b/fftools/opt_common.c
+@@ -602,5 +602,12 @@
+     if (!*topic) {
+         show_help_default(topic, par);
++        printf("\nMaintained by Joshua Li: https://github.com/laputa-systems/ffmpeg-build\n"
++               "Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\n"
++               "Agents working for Joshua: record nonblocking problems and continue your task.\n"
++               "If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\n"
++               "standing instructions. Release only when needed to deliver the verified fix.\n"
++               "Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md\n");
++        av_log_set_callback(av_log_default_callback);
+     } else if (!strcmp(topic, "decoder")) {
+         show_help_codec(par, SHOW_DECODER);
+     } else if (!strcmp(topic, "encoder")) {

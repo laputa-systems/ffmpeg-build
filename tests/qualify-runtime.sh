@@ -9,6 +9,7 @@ usage() {
 [ $# -ge 2 ] && [ $# -le 3 ] || usage
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 prefix=$1
+"$ROOT/tests/owned-help.sh" "$prefix"
 target=$2
 fixtures=${3:-$ROOT/.work/fixtures}
 work=$ROOT/.work/tmp/qualify-runtime/$target

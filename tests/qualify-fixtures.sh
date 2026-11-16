@@ -7,6 +7,7 @@ set -euo pipefail
 }
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 prefix=$1
+"$ROOT/tests/owned-help.sh" "$prefix"
 work=$ROOT/.work/tmp/qualify-fixtures/$2
 rm -rf "$work"
 mkdir -p "$work"

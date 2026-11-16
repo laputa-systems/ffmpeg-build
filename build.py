@@ -853,7 +853,7 @@ def component_problems(requested, resolved):
 
 def build_fingerprint(profile_path, target, profile_name, args, toolchain):
     digest = hashlib.sha256()
-    for path in (ROOT / "build.py", ROOT / "sources.lock.json", profile_path):
+    for path in (ROOT / "build.py", ROOT / "sources.lock.json", ROOT / "patches/ffmpeg-owned-help.patch", profile_path):
         digest.update(path.read_bytes())
     digest.update(
         json.dumps(
@@ -1077,6 +1077,7 @@ def build(target, profile_name):
     source_root = build_dir / "src"
     sources = {name: extract_source(lock[name], source_root) for name in profile["sources"]}
     ffmpeg_source = sources["ffmpeg"]
+    run(["patch", "-p1", "-i", ROOT / "patches/ffmpeg-owned-help.patch"], cwd=ffmpeg_source)
     (ffmpeg_source / "VERSION").write_text(lock["ffmpeg"].version + "\n")
 
     env = dep_env(config, deps, toolchain)
