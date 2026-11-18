@@ -43,7 +43,9 @@ test:
 
 coverage:
 	mkdir -p .work/coverage
+	uv run --frozen coverage erase
 	uv run --frozen coverage run -m unittest discover -s tests
+	uv run --frozen coverage combine
 	uv run --frozen coverage report
 	uv run --frozen coverage json -o .work/coverage/report.json
 
