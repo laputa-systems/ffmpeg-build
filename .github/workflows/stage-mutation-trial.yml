@@ -1,0 +1,59 @@
+name: Package and manifest mutation trial
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Exercise all stage record identities on a case-sensitive filesystem
+        shell: bash -euo pipefail {0}
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          make test
+          candidate=$(mktemp -d "$TMPDIR/package-mutmut.XXXXXX")
+          git archive HEAD | tar -xf - -C "$candidate"
+          mkdir -p "$candidate/.work/cache" "$candidate/.work/tmp"
+          cp -R .work/cache/sources "$candidate/.work/cache/sources"
+          cd "$candidate"
+          export TMPDIR="$PWD/.work/tmp"
+          test ! -e SOURCES.LOCK.JSON
+          cat >>pyproject.toml <<'TOML'
+
+          [tool.mutmut]
+          source_paths = ["build.py"]
+          also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles", ".work/cache/sources"]
+          pytest_add_cli_args_test_selection = ["tests/test_build.py"]
+          use_setproctitle = false
+          TOML
+          timeout 120s uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python -m mutmut run --max-children 1 '*x_package__mutmut_*' '*x_mismatched_source_pins__mutmut_*' '*x_read_manifest__mutmut_*' '*x_parse_stage_manifest__mutmut_*'
+          uv run --frozen python - <<'PY'
+          import json
+          from pathlib import Path
+          all_results = json.loads(Path("mutants/build.py.meta").read_text())["exit_code_by_key"]
+          results = {
+              key: code for key, code in all_results.items()
+              if key.startswith(("build.x_package__mutmut_", "build.x_mismatched_source_pins__mutmut_",
+                                    "build.x_read_manifest__mutmut_", "build.x_parse_stage_manifest__mutmut_"))
+          }
+          surviving = {key: code for key, code in results.items() if code != 1}
+          print(f"{len(results)} identities, {len(results) - len(surviving)} caught, remaining {surviving}")
+          assert len(results) == 232 and surviving == {
+              "build.x_package__mutmut_89": 0,
+              "build.x_read_manifest__mutmut_13": 0,
+              "build.x_read_manifest__mutmut_24": 0,
+          }
+          PY
