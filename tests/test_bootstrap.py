@@ -5,10 +5,15 @@ import tempfile
 import unittest
 from unittest import mock
 
-import bootstrap
+with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network access")):
+    import bootstrap
 
 
 class BootstrapTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        (bootstrap.ROOT / ".work" / "tmp").mkdir(parents=True, exist_ok=True)
+
     def test_rejects_malformed_wheel_pin_without_fetching(self):
         with tempfile.TemporaryDirectory(dir=bootstrap.ROOT / '.work' / 'tmp') as directory:
             root = pathlib.Path(directory)
