@@ -142,6 +142,20 @@ operator diagnostic, with staging bytes intact and no archive output. The full
 92-test suite, Ruff and ty passed. The earlier mutation identities remain
 historical because this change modifies `read_manifest` and `package`.
 
+
+Runtime qualification now uses sealed library trees for macOS ARM64 and Linux
+x86-64 musl. Valid archives pass, while a changed library or an internal link
+pointing to another library fails. A Linux test-only archive selects its own
+fixture qualification script. Disabling the library check and selecting the
+normal script made both new tests fail. No shipped binary was executed.
+
+At `4bd6076`, matching source selected 368 identities using the package mutation
+setup above with `qualify`, `archive_member_problems`, and
+`extracted_library_problems`. Baseline catches were 193/285, 27/35 and 30/48.
+The new cases caught 221/285, 27/35 and 34/48, or 282 total. Respectively 64,
+8 and 14 survived. The 94-test suite and both linters passed. Those survivors
+and native qualification remain open.
+
 ## Tickets
 
 
