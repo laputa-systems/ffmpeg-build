@@ -1,9 +1,11 @@
 import hashlib
 import importlib.util
+import io
 import json
 import pathlib
 import shutil
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -91,6 +93,20 @@ class AssembleReleaseTests(unittest.TestCase):
             assemble_release.assemble(
                 self.write_assets(stems, lock="b" * 64), self.root / "release", VERSION, COMMIT, LOCK
             )
+
+    def test_archive_commit_rejects_non_string_commit_and_preserves_absence(self):
+        archive = self.root / "asset.tar.xz"
+        for manifest, expected in [({"producer": {"commit": 42}}, ValueError), ({"producer": {}}, None)]:
+            payload = json.dumps(manifest).encode()
+            with tarfile.open(archive, "w:xz") as tar:
+                member = tarfile.TarInfo("asset/share/ffmpeg-build/manifest.json")
+                member.size = len(payload)
+                tar.addfile(member, io.BytesIO(payload))
+            if expected is ValueError:
+                with self.assertRaisesRegex(ValueError, "commit"):
+                    assemble_release.archive_commit(archive)
+            else:
+                self.assertIsNone(assemble_release.archive_commit(archive))
 
     def test_names_match_build_naming(self):
         for stem in assemble_release.expected_stems(VERSION):

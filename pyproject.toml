@@ -19,6 +19,9 @@ dev = [
 [tool.ruff]
 target-version = "py315"
 
+[tool.ty.rules]
+unsound-return-statement = "error"
+
 [tool.ty.environment]
 root = [".", "scripts", "tests"]
 python-version = "3.15"

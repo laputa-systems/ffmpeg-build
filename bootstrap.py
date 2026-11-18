@@ -16,18 +16,39 @@ def _digest(path: Path) -> str:
 
 
 def _wheel() -> Path:
-    inputs = json.loads((ROOT / "sources.lock.json").read_text())["inputs"]
-    pin = next(item for item in inputs if item["name"] == PIN)
-    path = CACHE / pin["filename"]
-    if path.is_file() and _digest(path) == pin["sha256"]:
+    lock: object = json.loads((ROOT / "sources.lock.json").read_text())
+    if not isinstance(lock, dict):
+        raise TypeError("invalid sources lock")
+    inputs: object = lock.get("inputs")
+    if not isinstance(inputs, list):
+        raise TypeError("invalid sources lock inputs")
+    for item in inputs:
+        if not isinstance(item, dict):
+            raise TypeError("invalid sources lock input")
+        if item.get("name") == PIN:
+            pin = item
+            break
+    else:
+        raise ValueError(f"missing {PIN} source")
+    filename: object = pin.get("filename")
+    url: object = pin.get("url")
+    sha256: object = pin.get("sha256")
+    if not isinstance(filename, str):
+        raise TypeError(f"invalid {PIN} filename")
+    if not isinstance(url, str):
+        raise TypeError(f"invalid {PIN} url")
+    if not isinstance(sha256, str):
+        raise TypeError(f"invalid {PIN} sha256")
+    path = CACHE / filename
+    if path.is_file() and _digest(path) == sha256:
         return path
     CACHE.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + ".part")
     try:
-        with urllib.request.urlopen(pin["url"], timeout=120) as response:
+        with urllib.request.urlopen(url, timeout=120) as response:
             part.write_bytes(response.read())
-        if _digest(part) != pin["sha256"]:
-            raise SystemExit(f"error: {pin['url']} does not match the sha256 pinned for {PIN}")
+        if _digest(part) != sha256:
+            raise SystemExit(f"error: {url} does not match the sha256 pinned for {PIN}")
         part.replace(path)
     finally:
         part.unlink(missing_ok=True)

@@ -11,19 +11,15 @@ Diagnose (DSLP-2) reviewed the first-party controller and profile validation, st
 
 Filed DSLP-6 (P2, assumed): a sealed temporary tools stage contained every required notice and program placeholder, a valid current producer commit, the locked FFmpeg version and a dav1d digest of 64 zeroes. With only `build_paths` and `DIST` redirected to that fixture, `build.package("aarch64-apple-darwin", "tools")` returned successfully; the archive retained the zero digest while its sidecar held the current lock digest. `build.py:1984-2016` explains the result, and `build.py:2121-2126` shows the later qualification guard. The regular package test at `tests/test_build.py:174` does not check stale dependency pins.
 
-Limits: no native media builds, artifact qualification scripts, release, upstream downloads beyond normal baseline setup, dependency or upstream code review, or external consumer runs. A sealed up-to-date build fixture also retained its original producer commit across a documentation-only revision; that accurately describes the build and was not filed as a separate defect. DSLP-3 through DSLP-5 remain for their later scopes.
+Limits: no native media builds, artifact qualification scripts, release, upstream downloads beyond normal baseline setup, dependency or upstream code review, or external consumer runs. A sealed up-to-date build fixture also retained its original producer commit across a documentation-only revision; that accurately describes the build and was not filed as a separate defect. DSLP-4 and DSLP-5 remain for their later scopes.
+
+Types (DSLP-3), scoped to bootstrap and release assembly at `32535b71`: adopted ty `unsound-return-statement = error`. The baseline had three diagnostics: two wheel `Path` returns inferred from `Any`, and archive commit `Any` returned as `str | None`. The source pin now checks the JSON object, inputs, filename, URL and digest before cache or network use; archive assembly checks the manifest, producer and optional commit. Malformed values fail explicitly; missing commit still returns `None`. Sealed tests use a local cache and archive, forbid network access, and fail against the original implementation. Restoring the original two files under the adopted rule reproduces exactly those three diagnostics. The first-party Python escape-hatch count (`cast`, `Any`, ignores and noqa) is unchanged at 3.
+
+Measured with pinned ty 0.0.101 and Ruff 0.17.4: ty `missing-type-argument`, `unused-ignore-comment`, `blanket-ignore-comment`, `disjoint-cast`, `dynamic-function-decorator-return`, `possibly-unresolved-reference`, `unsound-yield` and `unsupported-dynamic-base` each found 0; `unsound-assignment` found one temporary boundary assignment during implementation and 0 after narrowing. Ruff `ANN401`, `PGH003`, `TC`, `B` and `RET` found 0; `ANN` found 446 initially (447 after the new test helper). These settings were not adopted: zero findings provide no defect witness, and the broad annotation family concerns unrelated untyped internals. Those internals remain deferred; green ty does not prove them sound. No full build, external consumer qualification, or release was run; the release assembly tests exercise the candidate directly. DSLP-6 remains independent.
 
 ## Tickets
 
 
-### DSLP-3 · P2 · Types: strict profile and typing findings
-
-- **Area:** deslop · types
-- **Where:** type checker and lint configuration; Python sources
-- **Problem:** The strict-profile candidates in the deslop skill's tools reference have not been measured here.
-- **Recommendation:** Run the deslop Types step. Accept: clean at the adopted profile, escape hatches not increased, witnesses recorded.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
 
