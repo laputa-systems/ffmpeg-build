@@ -280,6 +280,16 @@ The collector production file is copied byte for byte to
 module names. Only the disposable test copy changes its import to match.
 No native build or release ran.
 
+Build stamp recovery at `004297dd46600ffb592fc630c20cd95ae6aeb1f8`
+used an otherwise complete tools stage. A JSON list, truncated JSON
+and undecodable UTF-8 each stopped the build before source acquisition.
+A matching object stamp still reuses the stage with no fetch. The
+candidate retries source acquisition for each corrupt stamp and leaves
+the stage and stamp intact if that fetch fails. The test uses the real
+stage completeness and fingerprint checks and stops at the acquisition
+boundary. Run `uv run --frozen python -m unittest discover -s tests -p test_build.py -k corrupt_build_stamp`.
+Native compiler and source download operations were not run.
+
 ## Tickets
 
 

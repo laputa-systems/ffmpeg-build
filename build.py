@@ -1058,8 +1058,13 @@ def build(target, profile_name):
     fingerprint = build_fingerprint(profile_path, target, profile_name, args, toolchain)
     stamp_path = build_dir / "stamp.json"
     if stamp_path.is_file() and stage_complete(stage, profile, config["platform"]):
-        stamp = read_json(stamp_path)
-        if stamp.get("fingerprint") == fingerprint:
+        try:
+            stamp: object = json.loads(stamp_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+            stamp = None
+        except OSError as exc:
+            fail(f"cannot read {stamp_path}: {exc}")
+        if isinstance(stamp, dict) and stamp.get("fingerprint") == fingerprint:
             print(f"up to date: {stage}")
             return
 

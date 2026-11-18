@@ -201,6 +201,43 @@ class StageTests(unittest.TestCase):
         path.write_text(json.dumps(manifest))
         return path
 
+    def test_corrupt_build_stamp_defers_rebuild_until_sources_are_available(self):
+        target = "aarch64-apple-darwin"
+        manifest = self.write_package_stage(target, "e" * 40)
+        build_root = pathlib.Path(self.temp.name) / "build"
+        build_dir = build_root / target / "tools"
+        build_dir.mkdir(parents=True)
+        stamp = build_dir / "stamp.json"
+        toolchain = {"compiler": "fixture"}
+        arguments = ["--disable-network"]
+        _, profile_path = build.load_profile("tools")
+        fingerprint = build.build_fingerprint(profile_path, target, "tools", arguments, toolchain)
+        original = manifest.read_bytes()
+
+        with (
+            mock.patch.object(build, "BUILD_ROOT", build_root),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build, "platform_toolchain", return_value=toolchain),
+            mock.patch.object(build, "configure_args_for", return_value=arguments),
+            mock.patch.object(build, "fetch_profile_sources", side_effect=RuntimeError("source unavailable")) as fetch,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            stamp.write_text(json.dumps({"fingerprint": fingerprint}))
+            build.build(target, "tools")
+            self.assertIn("up to date:", stdout.getvalue())
+            fetch.assert_not_called()
+
+            for content in (b"[]", b"{", bytes([255])):
+                with self.subTest(content=content):
+                    fetch.reset_mock()
+                    stamp.write_bytes(content)
+                    with self.assertRaisesRegex(RuntimeError, "^source unavailable$"):
+                        build.build(target, "tools")
+                    fetch.assert_called_once()
+                    self.assertEqual(manifest.read_bytes(), original)
+                    self.assertEqual(stamp.read_bytes(), content)
+
     def test_package_writes_archive_and_release_manifest(self):
         commit = "e" * 40
         target = "aarch64-apple-darwin"
