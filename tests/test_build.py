@@ -1,6 +1,7 @@
 import io
 import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -1168,6 +1169,139 @@ Libs: -L${libdir}  -lavcodec
 Libs.private:
 Cflags: -I${includedir}
 """
+
+
+class RuntimeLinkAuditTests(unittest.TestCase):
+    def setUp(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        directory = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(dir=scratch)))
+        self.binary = directory / "fixture"
+        self.profile, _ = build.load_profile("runtime")
+
+    def test_elf_checks_program_and_library_loader_contracts(self):
+        config = build.target_config(self.profile, "x86_64-unknown-linux-musl")
+        for role in ("program", "library"):
+            for valid in (True, False):
+                with self.subTest(role=role, valid=valid):
+                    kind = "pie executable" if role == "program" else "shared object"
+                    search = "$ORIGIN/../lib" if role == "program" else "$ORIGIN"
+                    loader = "/lib/ld-musl-x86_64.so.1"
+                    file_kind = f"ELF 64-bit {kind}, x86-64" if valid else f"data {kind}, x86-64"
+                    leaked = [f"dav1d_fixture{index:02d}" for index in range(11)]
+                    self.binary.write_bytes(b"fixture" if valid else b"GLIBC_fixture")
+                    responses = {
+                        ("file", "-b"): file_kind,
+                        ("readelf", "-dW"): (
+                            f" 0x1 (NEEDED) Shared library: [libc.musl-x86_64.so.1]\n"
+                            f" 0x1 (RUNPATH) Library runpath: [{search}]\n"
+                        ) if valid else (
+                            " 0x1 (NEEDED) Shared library: [libforeign.so]\n"
+                            " 0x1 (RPATH) Library rpath: [/legacy]\n"
+                            " 0x1 (TEXTREL) 0x0\n"
+                        ),
+                        ("readelf", "-lW"): (
+                            "Program Headers:\n"
+                            " GNU_STACK 0x0 0x0 0x0 0x0 0x200000 RW 0x4\n"
+                            f" [Requesting program interpreter: {loader}]\n" if valid else
+                            " GNU_STACK 0x0 0x0 0x0 0x0 0x100000 RW 0x4\n"
+                        ),
+                        ("nm", "-D", "--defined-only"): (
+                            "0000000000001000 T avcodec_open2\n" if valid else
+                            "".join(f"0000000000001000 T {symbol}\n" for symbol in leaked)
+                        ),
+                    }
+                    case = mock.Mock()
+                    with mock.patch.object(
+                        build, "output", side_effect=lambda args, reports=responses: reports[tuple(args[:-1])],
+                    ) as inspect:
+                        build.audit_runtime_elf(case, config, self.binary, role, set())
+                    self.assertEqual(
+                        [(call.args[0], bool(call.args[1])) for call in case.call_args_list],
+                        [
+                            (f"fixture is an x86-64 ELF {kind}", valid),
+                            ("fixture NEEDED only libav*, musl, and system libraries", valid),
+                            (f"fixture RUNPATH is {search}", valid),
+                            ("fixture has no RPATH", valid),
+                            ("fixture has no text relocations", valid),
+                            ("fixture thread stack is 2097152 B", valid),
+                            (f"fixture interpreter is {loader}" if role == "program" else
+                             "fixture exports no dav1d or zlib symbols", valid),
+                            ("fixture has no glibc symbol versions", valid),
+                        ],
+                    )
+                    if not valid:
+                        details = {call.args[0]: call.args[2:] for call in case.call_args_list}
+                        self.assertEqual(details[f"fixture is an x86-64 ELF {kind}"], (file_kind,))
+                        self.assertEqual(details["fixture NEEDED only libav*, musl, and system libraries"], ("foreign: ['libforeign.so']",))
+                        self.assertEqual(details[f"fixture RUNPATH is {search}"], ("RUNPATH []",))
+                        self.assertEqual(details["fixture has no RPATH"], ("RPATH ['/legacy']",))
+                        self.assertEqual(details["fixture thread stack is 2097152 B"], ("PT_GNU_STACK size 1048576",))
+                        if role == "program":
+                            self.assertEqual(details[f"fixture interpreter is {loader}"], ("found None",))
+                        else:
+                            self.assertEqual(details["fixture exports no dav1d or zlib symbols"], (f"exports: {leaked[:10]}",))
+                    self.assertTrue(all(call.args[0][-1] == str(self.binary) for call in inspect.call_args_list))
+
+    def test_macho_checks_program_and_library_load_and_signature_contracts(self):
+        config = build.target_config(self.profile, "aarch64-apple-darwin")
+        for role in ("program", "library"):
+            for valid in (True, False):
+                with self.subTest(role=role, valid=valid):
+                    kind = "executable" if role == "program" else "dynamically linked shared library"
+                    search = "@loader_path/../lib" if role == "program" else "@loader_path"
+                    file_kind = f"Mach-O 64-bit {kind} {'arm64' if valid else 'x86_64'}"
+                    leaked = [f"_dav1d_fixture{index:02d}" for index in range(11)]
+                    responses = {
+                        ("file", "-b"): file_kind,
+                        ("otool", "-l"): (
+                            "Load command 0\n cmd LC_RPATH\n"
+                            f" path {search if valid else '/wrong'} (offset 12)\n"
+                            "Load command 1\n cmd LC_LOAD_DYLIB\n"
+                            f" name {'/usr/lib/libSystem.B.dylib' if valid else '/usr/lib/libz.1.dylib'} (offset 24)\n"
+                            "Load command 2\n cmd LC_LOAD_DYLIB\n"
+                            " name /System/Library/Frameworks/AudioToolbox.framework/AudioToolbox (offset 24)\n"
+                        ),
+                        ("nm", "-gU"): (
+                            "0000000000001000 T _avcodec_open2\n" if valid else
+                            "".join(f"0000000000001000 T {symbol}\n" for symbol in leaked)
+                        ),
+                    }
+                    status = 0 if valid else 1
+                    signature = subprocess.CompletedProcess([], status, "", "signature invalid" if status else "")
+                    case = mock.Mock()
+                    with (
+                        mock.patch.object(
+                            build, "output", side_effect=lambda args, reports=responses: reports[tuple(args[:-1])],
+                        ) as inspect,
+                        mock.patch.object(build.subprocess, "run", return_value=signature) as sign,
+                    ):
+                        build.audit_runtime_macho(case, config, self.binary, role, set())
+                    labels = [
+                        f"fixture is a Mach-O arm64 {kind}",
+                        "fixture loads only libav*, libSystem, and profile frameworks",
+                        f"fixture LC_RPATH is {search}",
+                        "fixture links no dynamic zlib",
+                        "fixture code signature verifies",
+                    ]
+                    if role == "library":
+                        labels.append("fixture exports no dav1d or zlib symbols")
+                    self.assertEqual(
+                        [(call.args[0], bool(call.args[1])) for call in case.call_args_list],
+                        [(label, valid) for label in labels],
+                    )
+                    if not valid:
+                        details = {call.args[0]: call.args[2:] for call in case.call_args_list}
+                        self.assertEqual(details[labels[0]], (file_kind,))
+                        self.assertEqual(details[labels[1]], ("foreign: ['/usr/lib/libz.1.dylib']",))
+                        self.assertEqual(details[labels[2]], ("LC_RPATH ['/wrong']",))
+                        self.assertEqual(details["fixture code signature verifies"], ("signature invalid",))
+                        if role == "library":
+                            self.assertEqual(details["fixture exports no dav1d or zlib symbols"], (f"exports: {leaked[:10]}",))
+                    self.assertTrue(all(call.args[0][-1] == str(self.binary) for call in inspect.call_args_list))
+                    sign.assert_called_once_with(
+                        ["codesign", "--verify", "--strict", str(self.binary)], capture_output=True, text=True, check=False,
+                    )
 
 
 class RuntimeStageTests(unittest.TestCase):
