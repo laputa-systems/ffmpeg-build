@@ -1216,6 +1216,12 @@ def parse_stage_manifest(path: pathlib.Path) -> dict:
         raise TypeError("manifest producer must be an object")
     if not isinstance(producer.get("commit", ""), str):
         raise TypeError("manifest producer.commit must be a string")
+    toolchain = manifest.get("toolchain", {})
+    if not isinstance(toolchain, dict):
+        raise TypeError("manifest toolchain must be an object")
+    for field in ("cc", "sysroot", "cpu_baseline", "libc"):
+        if not isinstance(toolchain.get(field, ""), str):
+            raise TypeError(f"manifest toolchain.{field} must be a string")
     return manifest
 
 
