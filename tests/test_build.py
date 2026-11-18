@@ -322,6 +322,71 @@ class StageTests(unittest.TestCase):
             self.assertTrue(member.issym())
             self.assertEqual(member.linkname, "libavutil.1.dylib")
 
+    def test_qualify_checks_artifact_manifest_and_propagates_script_status(self):
+        target = "aarch64-apple-darwin"
+        manifest_path = self.write_package_stage(target, "e" * 40)
+        stage = manifest_path.parents[2]
+        version = build.load_sources()["ffmpeg"].version
+        name = f"ffmpeg-tools-{version}-{target}"
+        archive = pathlib.Path(self.temp.name) / f"{name}.tar.xz"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update({
+            "contract": 1, "configure_args": [], "components": {}, "auto_selected": {},
+            "external_libraries": [], "bundled_dependencies": [], "frameworks": [],
+            "system_libraries": [], "toolchain": {}, "license": "gpl",
+        })
+        manifest["release"] = {"archive": archive.name}
+        manifest_path.write_text(json.dumps(manifest))
+        work = pathlib.Path(self.temp.name) / "qualification"
+
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host") as native_host,
+            mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)) as runner,
+        ):
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 0)
+            self.assertIn("PASS audit: qualify-tools.sh passes", stdout.getvalue())
+            profile, _ = build.load_profile("tools")
+            native_host.assert_called_once_with(build.target_config(profile, target), target)
+            runner.assert_called_once_with(
+                ["bash", str(build.ROOT / "tests" / "qualify-tools.sh"),
+                 str(work / "qualify" / name / "path with spaces" / name), target],
+                check=False,
+            )
+            runner.return_value.returncode = 1
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("FAIL audit: qualify-tools.sh passes", stdout.getvalue())
+
+            runner.return_value.returncode = 0
+            manifest["sources"]["dav1d"]["sha256"] = "0" * 64
+            manifest_path.write_text(json.dumps(manifest))
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("FAIL audit: manifest sources match the lock", stdout.getvalue())
+
+            manifest_path.write_text("{")
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("FAIL audit: manifest readable", stdout.getvalue())
+
+            runner.reset_mock()
+            build.release.create_archive(stage, archive, mtime=1, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("non-normalized owner or mtime", stdout.getvalue())
+            runner.assert_not_called()
+            self.assertFalse((work / "qualify" / name / "path with spaces" / name).exists())
+
     def test_archive_member_problems(self):
         escape = build.tarfile.TarInfo("root/../evil")
         link = build.tarfile.TarInfo("root/link")
