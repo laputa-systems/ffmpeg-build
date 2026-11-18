@@ -212,14 +212,17 @@ that changed the audit return to zero failed the audit dispatch assertion
 
 With mutmut 3.8.1 and pytest 9.2.0, a fresh archive selected exactly 104
 `build.x_main__mutmut_*` identities: 102 killed (exit code 1), two survived
-(exit code 0), and none timed out or lacked tests. ID 1 changes `< (3, 12)`
-to `<= (3, 12)`; the tests exercise an actual-shaped 3.12 version tuple,
-but do not establish equivalence for all possible version values. ID 104
-changes the final fallback return from 2 to 3; the declared parser accepts
-only the six commands dispatched above, but the fallback's reachability has
-not been independently proven. Both remain open; neither is assumed equivalent.
-Other controller functions and native qualification remain open. The full
-107-test suite and Ruff and ty passed.
+(exit code 0), and none timed out or lacked tests. A fresh repeat after
+review gave the same two identities. ID 1 changes `< (3, 12)` to `<=`.
+The interpreter exposes a five-element version tuple, so comparing it with
+a two-element tuple can never yield equality. [Python version metadata](https://docs.python.org/3/library/sys.html#sys.version_info)
+
+ID 104 changes the unreachable terminal return from 2 to 3. The required
+subparser accepts only `version`, `qualify`, `fetch`, `build`, `audit` and
+`package`, and each branch returns. The invalid command process test exercises
+the parser's own status 2 before dispatch. These two identities are equivalent
+for the declared interpreter and CLI paths. Fetch, native build, and the
+whole-change gate remain open. All 107 tests, Ruff and ty passed.
 
 To reproduce, archive this commit into a fresh directory under `.work/tmp`,
 copy the verified `laputa_buildlib-0.1.0-py3-none-any.whl` to its
