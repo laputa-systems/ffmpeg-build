@@ -31,3 +31,14 @@ python3 -m unittest discover -s tests
 - Keep scratch under `.work/`, never `/tmp` or `$TMPDIR`. Set `TMPDIR=.work/tmp` for commands that spill files.
 - Releases are cut only by `.github/workflows/release.yml`, tagged `release-<commit>`; archives are `ffmpeg-<profile>-<version>-<target>.tar.xz` with a `.manifest.json`. See `docs/release.md`.
 - Do not run formatters.
+
+## Verification
+
+- On macOS arm64, `make test`: cold 0.41s (created `.venv`), warm 0.28s; 73 tests each. `make lint`: first 0.57s, warm 0.12s (after test setup). Times are elapsed, not performance gates.
+- `build.py` commands, flags and exit codes; Makefile and Linux wrapper entry points: none at the CLI boundary. `tests/test_build.py` exercises selected underlying functions.
+- `sources.lock.json` and profile configuration consumed by the builder: `tests/test_build.py` (`ProfileTests`, `RuntimeProfileTests`, `LicenseAndDeviceTests`, `FixturesProfileTests`); source download and full build: none in `make test`.
+- Archive names, members, symlinks and release manifests consumed by `play` and `usr`: `tests/test_build.py` (`StageTests`, `SymlinkTests`, `RuntimeStageTests`) and `tests/test_assemble_release.py`; full artifact qualification is `make verify` after a build.
+- `play` consumes the static SDK and fixture tools: `tests/qualify-sdk.sh`, `tests/sdk-consumer.c`, and `tests/qualify-fixtures.sh` exercise built artifacts, outside `make test`.
+- `usr` consumes tools; runtime is intended for `play`, `usr`, and Laputa packages: `tests/qualify-tools.sh`, `tests/qualify-runtime.sh`, and `tests/tools-workflows.sh` exercise built artifacts, outside `make test`.
+- No public Python API or server endpoint is declared. FFmpeg's shipped CLI and library behavior is covered only for the workflows above, not exhaustively.
+- Performance workload: none established. Playback decoding and tool transcoding are user-visible hot paths; later runtime-affecting work needs representative target-specific workloads and a baseline before a performance gate.
