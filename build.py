@@ -1222,6 +1222,17 @@ def parse_stage_manifest(path: pathlib.Path) -> dict:
     for field in ("cc", "sysroot", "cpu_baseline", "libc"):
         if not isinstance(toolchain.get(field, ""), str):
             raise TypeError(f"manifest toolchain.{field} must be a string")
+    libraries = manifest.get("libraries", {})
+    if not isinstance(libraries, dict):
+        raise TypeError("manifest libraries must be an object")
+    for name, library in libraries.items():
+        if not isinstance(library, dict):
+            raise TypeError(f"manifest libraries.{name} must be an object")
+        if not isinstance(library.get("file", ""), str):
+            raise TypeError(f"manifest libraries.{name}.file must be a string")
+        links = library.get("links", [])
+        if not isinstance(links, list) or not all(isinstance(link, str) for link in links):
+            raise TypeError(f"manifest libraries.{name}.links must be a list of strings")
     return manifest
 
 

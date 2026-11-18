@@ -674,6 +674,27 @@ class StageTests(unittest.TestCase):
             command = runner.call_args.args[0]
             self.assertEqual(pathlib.Path(command[1]).name, "qualify-runtime.sh")
 
+            avutil_entry = libraries["libavutil"]
+            malformed = (
+                ([], "manifest libraries must be an object"),
+                (libraries | {"libavutil": None}, "manifest libraries.libavutil must be an object"),
+                (libraries | {"libavutil": avutil_entry | {"file": []}},
+                 "manifest libraries.libavutil.file must be a string"),
+                (libraries | {"libavutil": avutil_entry | {"links": "lib/alias"}},
+                 "manifest libraries.libavutil.links must be a list of strings"),
+                (libraries | {"libavutil": avutil_entry | {"links": [1]}},
+                 "manifest libraries.libavutil.links must be a list of strings"),
+            )
+            for bad_libraries, diagnostic in malformed:
+                with self.subTest(diagnostic=diagnostic):
+                    manifest_path.write_text(json.dumps(manifest | {"libraries": bad_libraries}))
+                    build.release.create_archive(stage, archive, mtime=0, prefix=name)
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        self.assertEqual(build.qualify(archive), 1)
+                    self.assertIn(f"FAIL audit: manifest readable: {diagnostic}", stdout.getvalue().splitlines())
+
+            manifest_path.write_text(json.dumps(manifest))
             avutil = stage / f"lib/libavutil.1.{suffix}"
             avutil.write_bytes(b"changed binary")
             build.release.create_archive(stage, archive, mtime=0, prefix=name)
