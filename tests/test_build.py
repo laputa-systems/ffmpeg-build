@@ -352,6 +352,11 @@ class StageTests(unittest.TestCase):
             (json.dumps(valid | {"sources": {"ffmpeg": None}}), "manifest source ffmpeg must be an object"),
             (json.dumps(valid | {"producer": []}), "manifest producer must be an object"),
             (json.dumps(valid | {"producer": {"commit": 12}}), "manifest producer.commit must be a string"),
+            (json.dumps(valid | {"toolchain": []}), "manifest toolchain must be an object"),
+            (json.dumps(valid | {"toolchain": {"libc": None}}), "manifest toolchain.libc must be a string"),
+            (json.dumps(valid | {"toolchain": {"cc": 12}}), "manifest toolchain.cc must be a string"),
+            (json.dumps(valid | {"toolchain": {"sysroot": []}}), "manifest toolchain.sysroot must be a string"),
+            (json.dumps(valid | {"toolchain": {"cpu_baseline": True}}), "manifest toolchain.cpu_baseline must be a string"),
         )
         with mock.patch.object(build, "DIST", dist), mock.patch.object(build, "STAGE_ROOT", self.stage):
             for contents, message in cases:
@@ -413,6 +418,14 @@ class StageTests(unittest.TestCase):
             cases = (
                 (valid, good_config, good_components, []),
                 (wrong_commit, good_config, good_components, ["manifest producer commit"]),
+                (valid | {"toolchain": []}, good_config, good_components, ["manifest readable"]),
+                (valid | {"toolchain": toolchain | {"libc": None}}, good_config, good_components, ["manifest readable"]),
+                (valid | {"contract": 2}, good_config, good_components, ["manifest contract"]),
+                (valid | {"profile": "runtime"}, good_config, good_components, ["manifest profile and target"]),
+                (valid | {"target": "x86_64-unknown-linux-musl"}, good_config, good_components,
+                 ["manifest profile and target"]),
+                (valid | {"sources": valid["sources"] | {"ffmpeg": {"sha256": "0" * 64}}},
+                 good_config, good_components, ["manifest sources"]),
                 (valid, good_config.replace("--disable-network ", ""), good_components,
                  ["network disabled in configure", "manifest effective configure"]),
                 (valid, good_config.replace(" -march=", " -flto -march="), good_components, ["no LTO flags"]),

@@ -407,6 +407,18 @@ Use the same scratch archive recipe, select
 implementation is byte-for-byte identical. The remaining identities
 are still open. All 118 ordinary tests and both linters passed.
 
+The staged manifest reader now rejects non-object toolchain records
+and non-string compiler, sysroot, CPU baseline or libc fields. At
+`0de54ca`, the audit fixture reproduced attribute errors for a toolchain
+list and a null libc value. The reader and package tests now check
+the field diagnostics, preserved manifest bytes and absence of output.
+
+The same 696 audit identities moved from 376 to 386 catches. The
+audit function is unchanged. Additional cases vary the manifest
+contract version, profile, target and pinned source checksum
+independently. Use the existing `inconsistent_build_tree` selection
+above to reproduce the comparison.
+
 ## Tickets
 
 
