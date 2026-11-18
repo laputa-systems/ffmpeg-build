@@ -368,6 +368,70 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(path.read_text(), contents)
                     self.assertFalse(dist.exists())
 
+    def test_audit_reports_inconsistent_build_tree_and_stage(self):
+        target = "aarch64-unknown-linux-musl"
+        profile, path = build.load_profile("tools")
+        profile = profile | {"components": {"protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"]}}
+        config = build.target_config(profile, target)
+        toolchain = {"cc": "fixture clang", "sysroot": "/", "cpu_baseline": config["cpu_baseline"], "libc": "musl 1.2.6"}
+        build_root = pathlib.Path(self.temp.name) / "build"
+        ffmpeg = build_root / target / "tools" / "ffmpeg"
+        config_mak = ffmpeg / "ffbuild" / "config.mak"
+        config_mak.parent.mkdir(parents=True)
+        components = ffmpeg / "config_components.h"
+        good_components = "#define CONFIG_FILE_PROTOCOL 1\n#define CONFIG_LAVFI_INDEV 1\n#define CONFIG_AAC_ENCODER 1\n"
+        (ffmpeg / "config.h").write_text("#define ARCH_AARCH64 1\n")
+        effective_config = "--disable-network --enable-avdevice"
+        good_config = (
+            f"FFMPEG_CONFIGURATION={effective_config}\nCONFIG_ZLIB=yes\nCONFIG_GPL=yes\n"
+            f"CFLAGS=-fPIC -march={config['cpu_baseline']}\n"
+        )
+        with (
+            mock.patch.object(build, "load_profile", return_value=(profile, path)),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            mock.patch.object(build, "BUILD_ROOT", build_root),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build, "platform_toolchain", return_value=toolchain),
+            mock.patch.object(build, "audit_tools") as audit_programs,
+        ):
+            manifest_file = self.write_package_stage(target, "e" * 40)
+            stage, build_dir, deps = build.build_paths("tools", target)
+            valid = json.loads(manifest_file.read_text()) | {
+                "contract": 1,
+                "components": {"protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"]},
+                "auto_selected": {},
+                "external_libraries": [],
+                "bundled_dependencies": config.get("bundled_dependencies", []),
+                "frameworks": config.get("frameworks", []),
+                "system_libraries": config.get("system_libraries", []),
+                "toolchain": toolchain,
+                "configure_args": build.configure_args_for(profile, target, build_dir, deps, toolchain),
+                "configure": effective_config,
+                "license": "GPL version 2 or later",
+            }
+            wrong_commit = valid | {"producer": {"commit": "local"}}
+            cases = (
+                (valid, good_config, good_components, []),
+                (wrong_commit, good_config, good_components, ["manifest producer commit"]),
+                (valid, good_config.replace("--disable-network ", ""), good_components,
+                 ["network disabled in configure", "manifest effective configure"]),
+                (valid, good_config.replace(" -march=", " -flto -march="), good_components, ["no LTO flags"]),
+                (valid, good_config, good_components.replace("CONFIG_AAC_ENCODER", "CONFIG_MP3_ENCODER"),
+                 ["no unrequested encoders", "requested encoders present", "manifest components match build tree",
+                  "manifest auto-selected match build tree"]),
+            )
+            for manifest, config_text, component_text, failures in cases:
+                with self.subTest(failures=failures), redirect_stdout(io.StringIO()) as stdout:
+                    manifest_file.write_text(json.dumps(manifest))
+                    config_mak.write_text(config_text)
+                    components.write_text(component_text)
+                    self.assertEqual(build.audit(target, "tools"), int(bool(failures)), stdout.getvalue())
+                    result = [line.partition(": ")[2].split(": ", 1)[0] for line in stdout.getvalue().splitlines()
+                              if line.startswith("FAIL audit: ")]
+                    self.assertEqual(result, failures)
+                    self.assertEqual(audit_programs.call_args.args[1:],
+                                     (config, stage, build.load_sources()["ffmpeg"].version))
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]

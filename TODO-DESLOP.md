@@ -392,6 +392,21 @@ and the fixture checks both diagnostics, intact input bytes, and the
 absence of output. Missing fields still use the existing consumer
 checks.
 
+The shared audit fixture reads a tools build tree and staged manifest.
+The valid case exercises the shared audit and its handoff to the
+binary checks. Four changes cover commit identity, effective network
+configuration, LTO flags and the resolved encoder set. Each reports
+the expected failures. The binary handoff uses a test double here;
+the native profile checks exercise the actual binaries.
+
+Reusing the exact 696 audit identities from the full inventory, the
+fixture selected all 696, with 376 test failures and 320 survivors.
+Use the same scratch archive recipe, select
+`tests/test_build.py -k inconsistent_build_tree`, and run
+`mutmut run --max-children 1 'build.x_audit__mutmut_*'`. The audit
+implementation is byte-for-byte identical. The remaining identities
+are still open. All 118 ordinary tests and both linters passed.
+
 ## Tickets
 
 
