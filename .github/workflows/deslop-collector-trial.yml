@@ -1,0 +1,84 @@
+name: deslop collector trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  mutation:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Seal both mutation scopes
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          uv run --frozen python -c 'import bootstrap'
+          for name in collector bootstrap; do
+            dest="$TMPDIR/$name"
+            mkdir -p "$dest/workflow/scripts" "$dest/venv" "$dest/mutants/.work/tmp" "$dest/mutants/.work/cache/sources" "$dest/.work/cache/sources"
+            git archive HEAD | tar -x -C "$dest"
+            cp .work/cache/sources/*.whl "$dest/.work/cache/sources/"
+          done
+          export COLLECTOR="$TMPDIR/collector" BOOTSTRAP="$TMPDIR/bootstrap"
+          cp .github/scripts/assemble_release.py "$COLLECTOR/workflow/scripts/"
+          uv run --frozen python - <<'PY'
+          import os
+          from pathlib import Path
+
+          collector = Path(os.environ["COLLECTOR"])
+          test = collector / "tests/test_assemble_release.py"
+          s = test.read_text()
+          start, stop = s.index("spec = importlib.util"), s.index("sys.path.insert")
+          test.write_text(s[:start] + "from workflow.scripts import assemble_release\n" + s[stop:])
+          for root, sources, test, files in (
+              (collector, ["workflow/"], "tests/test_assemble_release.py",
+               ["bootstrap.py", "build.py", "sources.lock.json", ".work/cache/sources"]),
+              (Path(os.environ["BOOTSTRAP"]), ["bootstrap.py"], "tests/test_bootstrap.py",
+               ["sources.lock.json", ".work/cache/sources"]),
+          ):
+              with (root / "pyproject.toml").open("a") as config:
+                  config.write(f"\n[tool.mutmut]\nsource_paths = {sources!r}\n")
+                  config.write(f"pytest_add_cli_args_test_selection = [{test!r}]\n")
+                  config.write(f"also_copy = {files!r}\nuse_setproctitle = false\n")
+          PY
+      - name: Reconcile bootstrap and collector
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          root="$PWD"
+          for name in collector bootstrap; do
+            (
+              cd "$TMPDIR/$name"
+              timeout 120 uv run --project "$root" --frozen --with mutmut==3.8.1 --with pytest==9.2.0 mutmut run --max-children 1
+            )
+          done
+          uv run --frozen python - <<'PY'
+          import collections, json, os
+          from pathlib import Path
+
+          root = Path(os.environ["TMPDIR"])
+          for path, count, expected in (
+              ("collector/mutants/workflow/scripts/assemble_release.py.meta", 155,
+               {"x_check_manifest__mutmut_7", "x_assemble__mutmut_36", "x_assemble__mutmut_38"}),
+              ("bootstrap/mutants/bootstrap.py.meta", 75, set()),
+          ):
+              matches = json.loads((root / path).read_text())["exit_code_by_key"]
+              print(path, collections.Counter(matches.values()), flush=True)
+              assert len(matches) == count and set(matches.values()) <= {0, 1}, matches
+              survivors = {key.rsplit(".", 1)[-1] for key, code in matches.items() if code == 0}
+              print("survivors", sorted(survivors), flush=True)
+              assert survivors == expected, survivors
+          PY
