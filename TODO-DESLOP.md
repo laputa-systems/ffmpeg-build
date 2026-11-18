@@ -180,9 +180,8 @@ qualification, and the whole-change gate have independent open scope.
 
 
 The archive and runtime-library helpers at `6bd80b4` now have independent
-checks for owner/group metadata, member type, foreign roots, missing files,
-unrelated files, absolute inputs already covered by the member checks, and a
-missing Mach-O identity. The owner/group check and the missing-file fallback
+checks for owner/group metadata, member type, foreign roots, missing and
+unrelated files, and a missing Mach-O identity. The owner/group check and the missing-file fallback
 each failed a direct control. The same 83 identities moved from 63 to 81
 caught. `extracted_library_problems` catches all 48. `archive_member_problems`
 catches 33 of 35. Replacing `False` with `None` for the membership flag (ID 6)
