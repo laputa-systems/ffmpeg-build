@@ -290,6 +290,18 @@ stage completeness and fingerprint checks and stops at the acquisition
 boundary. Run `uv run --frozen python -m unittest discover -s tests -p test_build.py -k corrupt_build_stamp`.
 Native compiler and source download operations were not run.
 
+The native x86-64 Linux runtime artifact passed
+`make build verify TARGET=x86_64-unknown-linux-musl PROFILES=runtime`
+at trial head `e3a31ab3438969d6c27c9d322d512268217247da` with the locked
+inputs. The archive audit passed 145 checks during the build. The
+fixture verifier passed 55 media workflows against both the staged and
+unpacked binaries. The unpacked runtime also linked an external consumer,
+decoded H.264 and AV1 through the shared libraries, and passed its 14
+archive and manifest checks. The `ffmpeg-runtime-9.0.2-x86_64-unknown-linux-musl.tar.xz`
+SHA-256 was `a72dfd058ada8f22be12013d641ca4fbb5feeecceb734dedbfb06d5b31e8e8b0`.
+No release was published. Other profile and target combinations remain
+outside this run. [Hosted runtime run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44333488976)
+
 ## Tickets
 
 
