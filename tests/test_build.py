@@ -1,9 +1,11 @@
+import io
 import json
 import pathlib
 import sys
 import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -172,11 +174,12 @@ class StageTests(unittest.TestCase):
         dirty.write_bytes(str(build.ROOT).encode() + b"/.work/build/x.c")
         self.assertEqual(build.build_prefix_leaks(self.stage), ["lib/dirty.a"])
 
-    def write_tools_stage(self, target: str, commit: str) -> pathlib.Path:
-        profile, _ = build.load_profile("tools")
+    def write_package_stage(self, target: str, commit: str, profile_name: str = "tools") -> pathlib.Path:
+        profile, _ = build.load_profile(profile_name)
         lock = build.load_sources()
+        stage = self.stage / target / profile_name
         manifest = {
-            "profile": "tools",
+            "profile": profile_name,
             "target": target,
             "sources": {
                 name: {"version": lock[name].version, "url": lock[name].url, "sha256": lock[name].sha256}
@@ -184,11 +187,16 @@ class StageTests(unittest.TestCase):
             },
             "producer": {"commit": commit},
         }
-        for relative in [*build.notice_paths(profile), *(f"bin/{name}" for name in build.TOOLS_PROGRAMS)]:
-            path = self.stage / relative
+        paths = [*build.notice_paths(profile), *(f"bin/{name}" for name in build.TOOLS_PROGRAMS)]
+        if profile_name == "runtime":
+            paths.append("include/libavutil/ffversion.h")
+            for library in build.RUNTIME_LIBRARIES:
+                paths.extend((f"lib/{library}.dylib", f"lib/pkgconfig/{library}.pc"))
+        for relative in paths:
+            path = stage / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fixture")
-        path = self.stage / "share" / "ffmpeg-build" / "manifest.json"
+        path = stage / "share" / "ffmpeg-build" / "manifest.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(manifest))
         return path
@@ -196,15 +204,18 @@ class StageTests(unittest.TestCase):
     def test_package_writes_archive_and_release_manifest(self):
         commit = "e" * 40
         target = "aarch64-apple-darwin"
-        self.write_tools_stage(target, commit)
+        self.write_package_stage(target, commit)
         dist = pathlib.Path(self.temp.name) / "dist"
+        stdout = io.StringIO()
         with (
             mock.patch.object(build, "DIST", dist),
-            mock.patch.object(build, "build_paths", return_value=(self.stage, None, None)),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            redirect_stdout(stdout),
         ):
             archive = build.package(target, "tools")
         version = build.load_sources()["ffmpeg"].version
         self.assertEqual(archive.name, f"ffmpeg-tools-{version}-{target}.tar.xz")
+        self.assertEqual(stdout.getvalue().splitlines()[-1], f"{hashing.sha256_file(archive)}  {archive.name}")
         sidecar = json.loads((dist / f"ffmpeg-tools-{version}-{target}.manifest.json").read_text())
         self.assertEqual(
             sidecar,
@@ -219,28 +230,97 @@ class StageTests(unittest.TestCase):
         )
         with build.tarfile.open(archive, "r:xz") as opened:
             names = opened.getnames()
+            self.assertTrue(all(member.mtime == 0 for member in opened.getmembers()))
             handle = opened.extractfile(f"ffmpeg-tools-{version}-{target}/share/ffmpeg-build/manifest.json")
             assert handle is not None
             inner = json.load(handle)
         self.assertIn(f"ffmpeg-tools-{version}-{target}/bin/ffmpeg", names)
         self.assertEqual(inner["release"], {"archive": archive.name})
 
-    def test_package_rejects_a_stale_dependency_before_writing(self):
+    def test_missing_source_inventory_requires_all_profile_pins(self):
+        profile, _ = build.load_profile("tools")
+        self.assertEqual(build.mismatched_source_pins({}, profile, build.load_sources()), ["ffmpeg", "dav1d", "zlib"])
+
+    def test_package_reports_incomplete_stage(self):
         target = "aarch64-apple-darwin"
-        path = self.write_tools_stage(target, "e" * 40)
-        manifest = json.loads(path.read_text())
-        manifest["sources"]["dav1d"]["sha256"] = "0" * 64
-        original = json.dumps(manifest)
-        path.write_text(original)
+        stage = self.stage / target / "tools"
+        with (
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            self.assertRaises(SystemExit) as error,
+        ):
+            build.package(target, "tools")
+        self.assertEqual(str(error.exception), f"error: stage {stage} is incomplete; run build first")
+
+    def test_package_rejects_invalid_stage_identity_without_writing(self):
+        target = "aarch64-apple-darwin"
+        path = self.write_package_stage(target, "e" * 40)
+        valid = json.loads(path.read_text())
+        stale = json.loads(path.read_text())
+        stale["sources"]["dav1d"]["sha256"] = "0" * 64
+        del stale["sources"]["zlib"]
+        cases = (
+            (valid | {"profile": "runtime"}, f"stage manifest is for runtime/{target}"),
+            (valid | {"target": "x86_64-unknown-linux-musl"}, "stage manifest is for tools/x86_64-unknown-linux-musl"),
+            ({key: value for key, value in valid.items() if key != "sources"},
+             "stage manifest FFmpeg version disagrees with sources.lock.json"),
+            (valid | {"sources": {}}, "stage manifest FFmpeg version disagrees with sources.lock.json"),
+            ({key: value for key, value in valid.items() if key != "producer"},
+             "stage manifest producer commit is not a commit hash"),
+            (valid | {"producer": {}}, "stage manifest producer commit is not a commit hash"),
+            (stale, "stage manifest sources disagree with sources.lock.json: dav1d, zlib"),
+        )
+        dist = pathlib.Path(self.temp.name) / "dist"
+        with mock.patch.object(build, "DIST", dist), mock.patch.object(build, "STAGE_ROOT", self.stage):
+            for manifest, message in cases:
+                with self.subTest(message=message):
+                    original = json.dumps(manifest)
+                    path.write_text(original)
+                    with self.assertRaises(SystemExit) as error:
+                        build.package(target, "tools")
+                    self.assertEqual(str(error.exception), f"error: {message}")
+                    self.assertEqual(path.read_text(), original)
+                    self.assertFalse(dist.exists())
+
+    def test_package_reports_archive_error_for_a_symlinked_stage(self):
+        target = "aarch64-apple-darwin"
+        stage = self.write_package_stage(target, "e" * 40).parents[2]
+        actual_stage = stage.with_name("previous-stage")
+        stage.rename(actual_stage)
+        stage.symlink_to(actual_stage, target_is_directory=True)
         dist = pathlib.Path(self.temp.name) / "dist"
         with (
             mock.patch.object(build, "DIST", dist),
-            mock.patch.object(build, "build_paths", return_value=(self.stage, None, None)),
-            self.assertRaisesRegex(SystemExit, "sources.lock.json: dav1d"),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            self.assertRaises(SystemExit) as error,
         ):
             build.package(target, "tools")
-        self.assertEqual(path.read_text(), original)
+        self.assertEqual(str(error.exception), f"error: archive source is not a directory: {stage}")
         self.assertFalse(dist.exists())
+
+    def test_only_runtime_packages_preserve_internal_symlinks(self):
+        target = "aarch64-apple-darwin"
+        commit = "e" * 40
+        dist = pathlib.Path(self.temp.name) / "dist"
+        self.write_package_stage(target, commit)
+        tools_lib = self.stage / target / "tools" / "lib"
+        tools_lib.mkdir()
+        (tools_lib / "payload").write_bytes(b"fixture")
+        (tools_lib / "alias").symlink_to("payload")
+        with mock.patch.object(build, "DIST", dist), mock.patch.object(build, "STAGE_ROOT", self.stage):
+            with self.assertRaises(SystemExit) as error:
+                build.package(target, "tools")
+            self.assertEqual(str(error.exception), "error: tools stages carry no symlinks; found ['lib/alias']")
+            self.assertFalse(dist.exists())
+
+            self.write_package_stage(target, commit, "runtime")
+            library = self.stage / target / "runtime" / "lib" / "libavutil.dylib"
+            library.rename(library.with_name("libavutil.1.dylib"))
+            library.symlink_to("libavutil.1.dylib")
+            archive = build.package(target, "runtime")
+        with build.tarfile.open(archive, "r:xz") as opened:
+            member = opened.getmember(f"{archive.name.removesuffix('.tar.xz')}/lib/libavutil.dylib")
+            self.assertTrue(member.issym())
+            self.assertEqual(member.linkname, "libavutil.1.dylib")
 
     def test_archive_member_problems(self):
         escape = build.tarfile.TarInfo("root/../evil")
