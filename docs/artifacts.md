@@ -61,7 +61,7 @@ share/licenses/{ffmpeg,dav1d,zlib}/
 README
 ```
 
-`share/licenses/ffmpeg/` holds `LICENSE.md`, `CREDITS`, and `COPYING.LGPLv2.1`, plus `COPYING.GPLv2` for the GPL `runtime` and `tools` profiles.
+`share/licenses/ffmpeg/` holds `LICENSE.md`, `CREDITS`, and `COPYING.LGPLv2.1`, plus `COPYING.GPLv2` for the GPL `runtime`, `tools`, and `fixtures` profiles.
 
 SDK archives keep their symbols. Tools and runtime executables and runtime libraries are stripped, and on macOS ad-hoc signed after stripping. Today `usr` installs only the tools archive and never installs headers or libraries; consumers move to `runtime` separately.
 
@@ -74,7 +74,7 @@ SDK archives keep their symbols. Tools and runtime executables and runtime libra
 | `contract` | `1` |
 | `profile`, `target` | as in the archive name |
 | `release` | `{archive}`, written by `package` |
-| `sources` | version, URL, and SHA-256 of FFmpeg, dav1d, and zlib |
+| `sources` | version, URL, and SHA-256 of each source in the profile |
 | `producer` | repository and commit |
 | `configure_args`, `configure` | requested arguments and FFmpeg's recorded configuration |
 | `components` | every resolved component by category; input and output devices are `indevs` and `outdevs`, and `lavfi` is the only one ever enabled |
@@ -83,7 +83,7 @@ SDK archives keep their symbols. Tools and runtime executables and runtime libra
 | `bundled_dependencies` | static libraries shipped or linked in (`dav1d`, `zlib`) |
 | `frameworks`, `system_libraries` | what a consumer links from the system |
 | `toolchain` | `cc`, SDK and sysroot, deployment target, CPU baseline, host, and musl version |
-| `license` | FFmpeg's `FFMPEG_LICENSE`, set by the profile's `license` key: `GPL version 2 or later` for `runtime` and `tools`, `LGPL version 2.1 or later` for `play-sdk` |
+| `license` | FFmpeg's `FFMPEG_LICENSE`, set by the profile's `license` key: `GPL version 2 or later` for `runtime`, `tools`, and `fixtures`, `LGPL version 2.1 or later` for `play-sdk` |
 | `libraries` | `runtime` only; see below |
 
 `libraries` maps each of `libavcodec`, `libavdevice`, `libavfilter`, `libavformat`, `libavutil`, `libswresample`, and `libswscale` to:
