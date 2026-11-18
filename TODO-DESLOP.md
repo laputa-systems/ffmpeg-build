@@ -134,6 +134,14 @@ member paths. The 91-test suite passed with 857/1,472 statements and 342/590
 branches covered. Native producer/consumer checks retain their manual release
 boundary and were not executed by the test.
 
+
+The malformed-stage fixture at `69373f4` reproduced an array accepted by
+`read_manifest` and an invalid JSON traceback from `package`. Stage audit,
+qualification and packaging now share the object parser. Both cases emit an
+operator diagnostic, with staging bytes intact and no archive output. The full
+92-test suite, Ruff and ty passed. The earlier mutation identities remain
+historical because this change modifies `read_manifest` and `package`.
+
 ## Tickets
 
 

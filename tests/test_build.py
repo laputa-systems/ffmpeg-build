@@ -281,6 +281,26 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(path.read_text(), original)
                     self.assertFalse(dist.exists())
 
+    def test_stage_manifest_rejects_invalid_json_before_writing(self):
+        target = "aarch64-apple-darwin"
+        path = self.write_package_stage(target, "e" * 40)
+        dist = pathlib.Path(self.temp.name) / "dist"
+        cases = (("[]", "manifest root must be an object"), ("{", "Expecting property name"))
+        with mock.patch.object(build, "DIST", dist), mock.patch.object(build, "STAGE_ROOT", self.stage):
+            for contents, message in cases:
+                with self.subTest(contents=contents):
+                    path.write_text(contents)
+                    stdout = io.StringIO()
+                    check = build.Audit()
+                    with redirect_stdout(stdout):
+                        self.assertEqual(build.read_manifest(check, path.parents[2]), {})
+                        self.assertEqual(check.finish(), 1)
+                    self.assertIn(f"FAIL audit: manifest readable: {message}", stdout.getvalue())
+                    with self.assertRaisesRegex(SystemExit, f"stage manifest is unreadable: {message}"):
+                        build.package(target, "tools")
+                    self.assertEqual(path.read_text(), contents)
+                    self.assertFalse(dist.exists())
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]
