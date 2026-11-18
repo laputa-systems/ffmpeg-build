@@ -412,6 +412,41 @@ class StageTests(unittest.TestCase):
             runner.assert_not_called()
             self.assertFalse((work / "qualify" / name / "path with spaces" / name).exists())
 
+    def test_qualify_rejects_conflicting_manifest_identity(self):
+        target = "aarch64-apple-darwin"
+        archive, manifest_path, valid = self.qualification_fixture(target, "tools")
+        stage = manifest_path.parents[2]
+        name = archive.name.removesuffix(".tar.xz")
+        work = pathlib.Path(self.temp.name) / "qualification"
+        cases = (
+            ("profile", "runtime", "manifest profile matches name"),
+            ("target", "x86_64-unknown-linux-musl", "manifest target matches name"),
+            ("sources", valid["sources"] | {"ffmpeg": valid["sources"]["ffmpeg"] | {"version": "0.0.0"}},
+             "manifest FFmpeg version matches name"),
+            ("producer", {"commit": "missing"}, "manifest producer commit is a commit hash"),
+            ("release", {"archive": "old.tar.xz"}, "manifest release matches name"),
+        )
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)),
+        ):
+            for key, value, diagnostic in cases:
+                with self.subTest(field=key):
+                    manifest_path.write_text(json.dumps(valid | {key: value}))
+                    build.release.create_archive(stage, archive, mtime=0, prefix=name)
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        self.assertEqual(build.qualify(archive), 1)
+                    self.assertIn(f"FAIL audit: {diagnostic}", stdout.getvalue())
+
+            manifest_path.write_text(json.dumps({key: value for key, value in valid.items() if key != "toolchain"}))
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("FAIL audit: manifest has the contract keys: missing: ['toolchain']", stdout.getvalue())
+
     def test_qualify_runtime_checks_extracted_library_bytes_and_links(self):
         for target, suffix, identity in (
             ("aarch64-apple-darwin", "dylib", "install_name"),

@@ -156,6 +156,17 @@ The new cases caught 221/285, 27/35 and 34/48, or 282 total. Respectively 64,
 8 and 14 survived. The 94-test suite and both linters passed. Those survivors
 and native qualification remain open.
 
+
+Qualification now rejects individual mismatches in the staged profile,
+target, source version, producer commit and release filename, plus a missing
+contract field. Bypassing target identity returned a false success and failed
+the new target case. On `75fb9ff` the two runs selected the same 285
+`qualify` identities. The new cases caught 245, up from 221. The 40 live IDs
+are 40, 49, 55, 56, 59, 60, 62, 64, 69, 80, 85, 86, 179, 192, 196,
+198–204, 208, 209, 211, 214, 216–221, 223, 237, 239, 244, 250, 251,
+254 and 255. All 95 ordinary tests, Ruff and ty passed. The remaining
+archive and native verification scopes stay open.
+
 ## Tickets
 
 
