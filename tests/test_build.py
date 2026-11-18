@@ -367,6 +367,7 @@ class StageTests(unittest.TestCase):
         with (
             mock.patch.object(build, "TMP_ROOT", work),
             mock.patch.object(build, "require_native_host") as native_host,
+            mock.patch.object(build.tarfile.TarFile, "extraction_filter", staticmethod(lambda *_: None)),
             mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)) as runner,
         ):
             build.release.create_archive(stage, archive, mtime=0, prefix=name)
@@ -408,9 +409,55 @@ class StageTests(unittest.TestCase):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 self.assertEqual(build.qualify(archive), 1)
-            self.assertIn("non-normalized owner or mtime", stdout.getvalue())
+            report = stdout.getvalue().splitlines()[0]
+            self.assertTrue(report.startswith("FAIL audit: archive members are normalized and under the root: "))
+            with build.tarfile.open(archive, "r:xz") as opened:
+                examples = opened.getnames()[:5]
+            self.assertEqual(report.split(": ", 2)[2].split("; "), [
+                f"non-normalized owner or mtime: {member}" for member in examples
+            ])
             runner.assert_not_called()
             self.assertFalse((work / "qualify" / name / "path with spaces" / name).exists())
+
+    def test_qualify_reports_missing_notices_and_bounded_prefix_leaks(self):
+        target = "aarch64-apple-darwin"
+        archive, manifest_path, manifest = self.qualification_fixture(target, "tools")
+        stage = manifest_path.parents[2]
+        name = archive.name.removesuffix(".tar.xz")
+        work = pathlib.Path(self.temp.name) / "qualification"
+        manifest_path.write_text(json.dumps(manifest))
+        (stage / "README").unlink()
+        leaks = [f"leaked-{index:02}.txt" for index in range(11)]
+        for relative in leaks:
+            (stage / relative).write_text("fixture from /example/.work/build/ffmpeg")
+        build.release.create_archive(stage, archive, mtime=0, prefix=name)
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)),
+            redirect_stdout(stdout),
+        ):
+            self.assertEqual(build.qualify(archive), 1)
+        lines = stdout.getvalue().splitlines()
+        self.assertIn(f"PASS audit: archive root is {name}", lines)
+        self.assertIn("FAIL audit: README and licenses present: missing: ['README']", lines)
+        self.assertIn(f"FAIL audit: no absolute build-tree path in any file: files: {leaks[:10]}", lines)
+
+    def test_qualify_requires_xz_content(self):
+        target = "aarch64-apple-darwin"
+        archive, manifest_path, manifest = self.qualification_fixture(target, "tools")
+        manifest_path.write_text(json.dumps(manifest))
+        name = archive.name.removesuffix(".tar.xz")
+        with build.tarfile.open(archive, "w") as uncompressed:
+            uncompressed.add(manifest_path.parents[2], arcname=name)
+        work = pathlib.Path(self.temp.name) / "qualification"
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host"),
+            self.assertRaises(build.tarfile.ReadError),
+        ):
+            build.qualify(archive)
 
     def test_qualify_rejects_conflicting_manifest_identity(self):
         target = "aarch64-apple-darwin"
@@ -499,7 +546,31 @@ class StageTests(unittest.TestCase):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 self.assertEqual(build.qualify(archive), 1)
-            self.assertIn(f"libavutil: lib/libavutil.{suffix} does not resolve", stdout.getvalue())
+            self.assertIn(
+                f"FAIL audit: manifest libraries match the extracted files and links: "
+                f"libavutil: lib/libavutil.{suffix} does not resolve to lib/libavutil.1.{suffix}",
+                stdout.getvalue().splitlines(),
+            )
+
+            manifest_path.write_text(json.dumps({key: value for key, value in manifest.items() if key != "libraries"}))
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("FAIL audit: manifest has the contract keys: missing: ['libraries']", stdout.getvalue())
+
+            manifest_path.write_text(json.dumps(manifest))
+            for library in build.RUNTIME_LIBRARIES:
+                (stage / f"lib/{library}.1.{suffix}").write_bytes(b"changed binary")
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            first_five = "; ".join(f"{library}: sha256 mismatch" for library in sorted(build.RUNTIME_LIBRARIES)[:5])
+            self.assertIn(
+                f"FAIL audit: manifest libraries match the extracted files and links: {first_five}",
+                stdout.getvalue().splitlines(),
+            )
 
     def test_qualify_test_only_profile_selects_fixture_script(self):
         target = "x86_64-unknown-linux-musl"

@@ -167,6 +167,17 @@ are 40, 49, 55, 56, 59, 60, 62, 64, 69, 80, 85, 86, 179, 192, 196,
 254 and 255. All 95 ordinary tests, Ruff and ty passed. The remaining
 archive and native verification scopes stay open.
 
+
+The qualification follow-up at `cf63e30` checks XZ compression, explicit
+archive extraction filtering, missing documentation and runtime inventory,
+and bounded diagnostics for changed files. Disabling the notice check and
+using format auto-detection independently failed the added cases. Across the
+same 285 `qualify` identities, the prior suite caught 245 and the follow-up
+caught 284. ID 179 is equivalent because both missing-commit defaults fail
+the same required lowercase hexadecimal match. All 97 ordinary tests and both
+linters passed. The neighboring archive-member and library helpers, native
+qualification, and the whole-change gate have independent open scope.
+
 ## Tickets
 
 
