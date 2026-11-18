@@ -1196,14 +1196,21 @@ class Audit:
         return 0 if failed == 0 else 1
 
 
+def parse_stage_manifest(path: pathlib.Path) -> dict:
+    manifest: object = json.loads(path.read_text())
+    if not isinstance(manifest, dict):
+        raise TypeError("manifest root must be an object")
+    return manifest
+
+
 def read_manifest(check, stage):
     path = stage / "share" / "ffmpeg-build" / "manifest.json"
     if not path.is_file():
         check.case("manifest readable", False, f"missing {path}")
         return {}
     try:
-        manifest = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
+        manifest = parse_stage_manifest(path)
+    except (TypeError, ValueError) as exc:
         check.case("manifest readable", False, str(exc))
         return {}
     check.case("manifest readable", True)
@@ -1989,7 +1996,10 @@ def package(target, profile_name):
     stage, _, _ = build_paths(profile_name, target)
     if not stage_complete(stage, profile, config["platform"]):
         fail(f"stage {stage} is incomplete; run build first")
-    manifest = json.loads((stage / "share" / "ffmpeg-build" / "manifest.json").read_text())
+    try:
+        manifest = parse_stage_manifest(stage / "share" / "ffmpeg-build" / "manifest.json")
+    except (TypeError, ValueError) as exc:
+        fail(f"stage manifest is unreadable: {exc}")
     version = lock["ffmpeg"].version
     if manifest.get("profile") != profile_name or manifest.get("target") != target:
         fail(f"stage manifest is for {manifest.get('profile')}/{manifest.get('target')}")
