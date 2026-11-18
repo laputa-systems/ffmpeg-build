@@ -136,6 +136,20 @@ class AssembleReleaseTests(unittest.TestCase):
         )
         self.assertFalse(destination.exists())
 
+    def test_command_reports_non_object_manifest_without_publishing(self):
+        lock = hashlib.sha256((ROOT / "sources.lock.json").read_bytes()).hexdigest()
+        stems = assemble_release.expected_stems(VERSION)
+        paths = self.write_assets(stems, lock=lock)
+        sidecar = next(path for path in paths if path.name == f"{stems[0]}.manifest.json")
+        sidecar.write_text("[]")
+        destination = self.root / "release"
+
+        status, stdout, stderr = self.invoke_command(self.source, destination, VERSION, COMMIT)
+
+        self.assertEqual((status, stdout), (1, ""))
+        self.assertEqual(stderr, f"assemble failed: {sidecar.name}: invalid release manifest\n")
+        self.assertFalse(destination.exists())
+
     def test_leaves_existing_destination_intact(self):
         assets = self.write_assets(assemble_release.expected_stems(VERSION))
         destination = self.root / "release"

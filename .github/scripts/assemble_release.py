@@ -49,7 +49,9 @@ def archive_commit(path: Path) -> str | None:
 
 
 def check_manifest(path: Path, stem: str, version: str, commit: str, lock_sha256: str) -> None:
-    manifest = json.loads(path.read_text())
+    manifest: object = json.loads(path.read_text())
+    if not isinstance(manifest, dict):
+        raise TypeError(f"{path.name}: invalid release manifest")
     profile, _, target = stem.removeprefix("ffmpeg-").partition(f"-{version}-")
     expected = release.build_manifest(
         product=f"ffmpeg-{profile}",
