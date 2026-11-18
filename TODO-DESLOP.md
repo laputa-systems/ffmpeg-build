@@ -419,6 +419,19 @@ contract version, profile, target and pinned source checksum
 independently. Use the existing `inconsistent_build_tree` selection
 above to reproduce the comparison.
 
+Runtime qualification now diagnoses malformed library records
+at the manifest reader. With the previous reader, list and null
+records produced attribute errors while invalid file and link
+values could raise type errors. The new cases use actual archives
+of both runtime manifest shapes and assert the field diagnostic.
+The fixtures also retain checks for valid records, missing metadata,
+changed bytes and incorrect symlinks.
+
+Run `python -m unittest test_build.StageTests.test_qualify_runtime_checks_extracted_library_bytes_and_links`
+with `PYTHONPATH=tests:.` in the locked environment. The fixtures
+mock the native script and verify the extraction and manifest
+paths. The 118 ordinary tests, Ruff and ty passed.
+
 ## Tickets
 
 
