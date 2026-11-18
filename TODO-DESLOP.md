@@ -65,6 +65,25 @@ Read the 35 matching keys in `mutants/ci/release/assemble_release.py.meta`
 under `exit_code_by_key`. The alternate import path matches mutmut's
 module naming. The wider release functions and controller remain open.
 
+
+The whole release assembly script at `afe69a3` generated 153 mutations
+under the same setup with the function selector omitted. Before the command
+and assembly assertions, 97 were caught, 14 survived, and all 42 in the CLI
+entry point had no tests. The new assertions catch 149 of the same 153.
+Three survivors are equivalent for the declared artifact inputs:
+`check_manifest` mutation 5 splits a stem with one exact version separator;
+`assemble` mutations 36 and 38 pass a falsey value or omit the default-false
+`exist_ok` argument. `main` mutation 16 uppercases the lock filename. Both
+spellings resolve to the same inode on the local macOS volume. A case-sensitive
+hosted filesystem is required to classify that identity there.
+
+The earlier archive-commit test changed the sidecar and the archive together,
+so the sidecar rejected the fixture first. The updated fixture changes only
+the archive commit. Direct controls also cover incorrect output-directory
+creation, usage status, duplicate and missing assets, the sidecar diagnostic,
+and preservation of an existing destination. The 82-test ordinary suite
+and Ruff and ty passed.
+
 ## Tickets
 
 

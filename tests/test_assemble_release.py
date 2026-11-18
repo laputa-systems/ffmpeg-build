@@ -8,7 +8,9 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Literal
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("assemble_release", ROOT / ".github" / "scripts" / "assemble_release.py")
@@ -36,13 +38,13 @@ class AssembleReleaseTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def write_assets(self, stems, commit=COMMIT, lock=LOCK):
+    def write_assets(self, stems, archive_commit=COMMIT, lock=LOCK):
         paths = []
         for index, stem in enumerate(stems):
             directory = self.source / str(index)
             directory.mkdir()
             archive = directory / f"{stem}.tar.xz"
-            manifest = json.dumps({"producer": {"commit": commit}}).encode()
+            manifest = json.dumps({"producer": {"commit": archive_commit}}).encode()
             tree = directory / "tree"
             (tree / "share" / "ffmpeg-build").mkdir(parents=True)
             (tree / "share" / "ffmpeg-build" / "manifest.json").write_bytes(manifest)
@@ -57,7 +59,7 @@ class AssembleReleaseTests(unittest.TestCase):
                         "product": f"ffmpeg-{profile}",
                         "version": VERSION,
                         "target": target,
-                        "source_revision": commit,
+                        "source_revision": COMMIT,
                         "sources_lock_sha256": lock,
                     }
                 )
@@ -65,36 +67,85 @@ class AssembleReleaseTests(unittest.TestCase):
             paths.extend([archive, sidecar])
         return paths
 
-    def test_ten_products_with_manifests_and_sorted_sums(self):
+    def invoke_command(self, *args: str | pathlib.Path) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        argv = ["assemble_release.py", *map(str, args)]
+        with patch.object(sys, "argv", argv), redirect_stdout(stdout), redirect_stderr(stderr):
+            status: object = assemble_release.main()
+        if type(status) is not int:
+            self.fail(f"expected integer exit status, got {status!r}")
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def test_command_assembles_ten_products_with_manifests_and_sorted_sums(self):
         stems = assemble_release.expected_stems(VERSION)
         self.assertEqual(len(stems), 10)
         self.assertIn("ffmpeg-fixtures-9.0.2-x86_64-unknown-linux-musl", stems)
-        names = assemble_release.assemble(self.write_assets(stems), self.root / "release", VERSION, COMMIT, LOCK)
-        self.assertEqual(len(names), 20)
-        sums = (self.root / "release" / "SHA256SUMS").read_text().splitlines()
-        self.assertEqual([line.split("  ")[1] for line in sums], sorted(names))
-        digest, name = sums[0].split("  ")
-        self.assertEqual(digest, hashlib.sha256((self.root / "release" / name).read_bytes()).hexdigest())
+        lock = hashlib.sha256((ROOT / "sources.lock.json").read_bytes()).hexdigest()
+        assets = self.write_assets(stems, lock=lock)
+        destination = self.root / "new" / "release"
+        status, stdout, stderr = self.invoke_command(self.source, destination, VERSION, COMMIT)
+        self.assertEqual((status, stderr), (0, ""))
+        names = stdout.splitlines()
+        self.assertEqual(names, sorted(path.name for path in assets))
+        sums = (destination / "SHA256SUMS").read_text().splitlines()
+        self.assertEqual([line.split("  ")[1] for line in sums], names)
+        digest = hashlib.sha256((destination / names[0]).read_bytes()).hexdigest()
+        self.assertEqual(sums[0], f"{digest}  {names[0]}")
 
-    def test_rejects_missing_asset(self):
+    def test_command_displays_usage_on_missing_arguments(self):
+        status, stdout, stderr = self.invoke_command(self.source)
+        self.assertEqual((status, stdout), (2, ""))
+        self.assertEqual(stderr, "usage: assemble_release.py <artifacts-dir> <release-dir> <version> <commit>\n")
+
+    def test_reports_missing_and_extra_assets(self):
         stems = assemble_release.expected_stems(VERSION)
-        paths = self.write_assets(stems)
-        with self.assertRaises(ValueError):
-            assemble_release.assemble(paths[1:], self.root / "release", VERSION, COMMIT, LOCK)
+        missing, *paths = self.write_assets(stems)
+        unexpected = self.source / "unexpected.tar.xz"
+        with self.assertRaises(ValueError) as error:
+            assemble_release.assemble([*paths, unexpected], self.root / "release", VERSION, COMMIT, LOCK)
+        self.assertEqual(
+            str(error.exception),
+            f"asset set mismatch: missing {[missing.name]}, unexpected {[unexpected.name]}",
+        )
+
+    def test_reports_duplicate_asset_name(self):
+        paths = self.write_assets(assemble_release.expected_stems(VERSION))
+        with self.assertRaises(ValueError) as error:
+            assemble_release.assemble([*paths, paths[0]], self.root / "release", VERSION, COMMIT, LOCK)
+        self.assertEqual(str(error.exception), f"duplicate asset {paths[0].name}")
 
     def test_rejects_archive_from_other_commit(self):
         stems = assemble_release.expected_stems(VERSION)
-        with self.assertRaises(ValueError):
-            assemble_release.assemble(
-                self.write_assets(stems, "d" * 40), self.root / "release", VERSION, COMMIT, LOCK
-            )
+        wrong = "d" * 40
+        with self.assertRaises(ValueError) as error:
+            assemble_release.assemble(self.write_assets(stems, wrong), self.root / "release", VERSION, COMMIT, LOCK)
+        self.assertEqual(str(error.exception), f"{stems[0]}.tar.xz was built from {wrong!r}, not {COMMIT}")
 
-    def test_rejects_manifest_for_other_lock(self):
+    def test_command_reports_manifest_for_other_lock(self):
         stems = assemble_release.expected_stems(VERSION)
-        with self.assertRaises(ValueError):
-            assemble_release.assemble(
-                self.write_assets(stems, lock="b" * 64), self.root / "release", VERSION, COMMIT, LOCK
-            )
+        wrong = "b" * 64
+        self.write_assets(stems, lock=wrong)
+        lock = hashlib.sha256((ROOT / "sources.lock.json").read_bytes()).hexdigest()
+        destination = self.root / "release"
+        status, stdout, stderr = self.invoke_command(self.source, destination, VERSION, COMMIT)
+        self.assertEqual((status, stdout), (1, ""))
+        self.assertEqual(
+            stderr,
+            f"assemble failed: {stems[0]}.manifest.json: sources_lock_sha256 is {wrong!r}, expected {lock!r}\n",
+        )
+        self.assertFalse(destination.exists())
+
+    def test_leaves_existing_destination_intact(self):
+        assets = self.write_assets(assemble_release.expected_stems(VERSION))
+        destination = self.root / "release"
+        destination.mkdir()
+        sentinel = destination / "preexisting"
+        sentinel.write_bytes(b"existing release")
+        with self.assertRaises(FileExistsError):
+            assemble_release.assemble(assets, destination, VERSION, COMMIT, LOCK)
+        self.assertEqual(list(destination.iterdir()), [sentinel])
+        self.assertEqual(sentinel.read_bytes(), b"existing release")
 
     def write_archive(
         self, member: tarfile.TarInfo | None, payload: bytes = b"", *, mode: Literal["w:xz", "w:gz"] = "w:xz"
