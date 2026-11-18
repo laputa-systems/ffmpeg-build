@@ -172,24 +172,35 @@ class StageTests(unittest.TestCase):
         dirty.write_bytes(str(build.ROOT).encode() + b"/.work/build/x.c")
         self.assertEqual(build.build_prefix_leaks(self.stage), ["lib/dirty.a"])
 
-    def test_package_writes_archive_and_release_manifest(self):
-        commit = "e" * 40
-        target = "aarch64-apple-darwin"
+    def write_tools_stage(self, target: str, commit: str) -> pathlib.Path:
+        profile, _ = build.load_profile("tools")
+        lock = build.load_sources()
         manifest = {
             "profile": "tools",
             "target": target,
-            "sources": {"ffmpeg": {"version": build.load_sources()["ffmpeg"].version}},
+            "sources": {
+                name: {"version": lock[name].version, "url": lock[name].url, "sha256": lock[name].sha256}
+                for name in profile["sources"]
+            },
             "producer": {"commit": commit},
         }
-        (self.stage / "share" / "ffmpeg-build").mkdir(parents=True)
-        (self.stage / "share" / "ffmpeg-build" / "manifest.json").write_text(json.dumps(manifest))
-        (self.stage / "bin").mkdir()
-        (self.stage / "bin" / "ffmpeg").write_bytes(b"exe")
+        for relative in [*build.notice_paths(profile), *(f"bin/{name}" for name in build.TOOLS_PROGRAMS)]:
+            path = self.stage / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture")
+        path = self.stage / "share" / "ffmpeg-build" / "manifest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(manifest))
+        return path
+
+    def test_package_writes_archive_and_release_manifest(self):
+        commit = "e" * 40
+        target = "aarch64-apple-darwin"
+        self.write_tools_stage(target, commit)
         dist = pathlib.Path(self.temp.name) / "dist"
         with (
             mock.patch.object(build, "DIST", dist),
             mock.patch.object(build, "build_paths", return_value=(self.stage, None, None)),
-            mock.patch.object(build, "stage_complete", return_value=True),
         ):
             archive = build.package(target, "tools")
         version = build.load_sources()["ffmpeg"].version
@@ -213,6 +224,23 @@ class StageTests(unittest.TestCase):
             inner = json.load(handle)
         self.assertIn(f"ffmpeg-tools-{version}-{target}/bin/ffmpeg", names)
         self.assertEqual(inner["release"], {"archive": archive.name})
+
+    def test_package_rejects_a_stale_dependency_before_writing(self):
+        target = "aarch64-apple-darwin"
+        path = self.write_tools_stage(target, "e" * 40)
+        manifest = json.loads(path.read_text())
+        manifest["sources"]["dav1d"]["sha256"] = "0" * 64
+        original = json.dumps(manifest)
+        path.write_text(original)
+        dist = pathlib.Path(self.temp.name) / "dist"
+        with (
+            mock.patch.object(build, "DIST", dist),
+            mock.patch.object(build, "build_paths", return_value=(self.stage, None, None)),
+            self.assertRaisesRegex(SystemExit, "sources.lock.json: dav1d"),
+        ):
+            build.package(target, "tools")
+        self.assertEqual(path.read_text(), original)
+        self.assertFalse(dist.exists())
 
     def test_archive_member_problems(self):
         escape = build.tarfile.TarInfo("root/../evil")

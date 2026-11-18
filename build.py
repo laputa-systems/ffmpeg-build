@@ -1210,6 +1210,14 @@ def read_manifest(check, stage):
     return manifest
 
 
+def mismatched_source_pins(manifest, profile, lock):
+    sources = manifest.get("sources", {})
+    return [
+        name for name in profile["sources"]
+        if sources.get(name, {}).get("sha256") != lock[name].sha256
+    ]
+
+
 def audit(target, profile_name):
     lock = load_sources()
     profile, _ = load_profile(profile_name)
@@ -1293,14 +1301,7 @@ def audit(target, profile_name):
             "manifest profile and target",
             manifest.get("profile") == profile_name and manifest.get("target") == target,
         )
-        case(
-            "manifest sources",
-            all(
-                manifest.get("sources", {}).get(name, {}).get("sha256")
-                == lock[name].sha256
-                for name in profile["sources"]
-            ),
-        )
+        case("manifest sources", not mismatched_source_pins(manifest, profile, lock))
         case("manifest components match build tree", manifest.get("components") == resolved)
         case("manifest auto-selected match build tree", manifest.get("auto_selected") == selected)
         case("manifest external libraries", manifest.get("external_libraries") == external_libraries)
@@ -1996,6 +1997,9 @@ def package(target, profile_name):
         fail("stage manifest FFmpeg version disagrees with sources.lock.json")
     if not COMMIT.match(manifest.get("producer", {}).get("commit", "")):
         fail("stage manifest producer commit is not a commit hash")
+    mismatched = mismatched_source_pins(manifest, profile, lock)
+    if mismatched:
+        fail(f"stage manifest sources disagree with sources.lock.json: {', '.join(mismatched)}")
     product = f"ffmpeg-{profile_name}"
     try:
         archive_file = release.archive_name(product, version, target)
@@ -2118,13 +2122,7 @@ def qualify(archive_path):
         manifest.get("sources", {}).get("ffmpeg", {}).get("version") == parsed["version"]
         == lock["ffmpeg"].version,
     )
-    case(
-        "manifest sources match the lock",
-        all(
-            manifest.get("sources", {}).get(name, {}).get("sha256") == lock[name].sha256
-            for name in profile["sources"]
-        ),
-    )
+    case("manifest sources match the lock", not mismatched_source_pins(manifest, profile, lock))
     case(
         "manifest producer commit is a commit hash",
         bool(COMMIT.match(manifest.get("producer", {}).get("commit", ""))),
