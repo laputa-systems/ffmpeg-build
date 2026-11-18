@@ -190,6 +190,19 @@ as a relative candidate (ID 16) has no effect because regular-file and link
 checks both ignore directories. Root shape validation outside that declared
 input stays separate. The full 99-test suite and both linters passed.
 
+
+The stage reader follow-up at `e25d04e` verifies the exact failure path and
+success result. Treating an absent file as readable fails the added case.
+The current package, source-pin, stage parser and reader selection contains
+232 identities. The new reader case moves the count from 211 to 225 caught
+on macOS, including all 17 source-pin and all six parser identities. Reader
+IDs 13 and 24 replace a false flag with `None`. `Audit.case` treats both the
+same for the status, diagnostic and result tally. Package ID 89 substitutes
+an equally invalid missing-commit value. Package IDs 30, 32, 34 and 167
+alter path case. The Linux ARM64 trial at `600b2a2` caught all four, for
+229 caught and the three equivalents. All 100 tests and both linters passed.
+[Hosted run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44311448379)
+
 ## Tickets
 
 
