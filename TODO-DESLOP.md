@@ -199,8 +199,9 @@ on macOS, including all 17 source-pin and all six parser identities. Reader
 IDs 13 and 24 replace a false flag with `None`. `Audit.case` treats both the
 same for the status, diagnostic and result tally. Package ID 89 substitutes
 an equally invalid missing-commit value. Package IDs 30, 32, 34 and 167
-alter path case and still need the current Linux trial. All 100 tests and
-both linters passed.
+alter path case. The Linux ARM64 trial at `600b2a2` caught all four, for
+229 caught and the three equivalents. All 100 tests and both linters passed.
+[Hosted run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44311448379)
 
 ## Tickets
 
