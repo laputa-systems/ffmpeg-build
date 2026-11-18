@@ -342,12 +342,10 @@ class StageTests(unittest.TestCase):
             self.assertTrue(member.issym())
             self.assertEqual(member.linkname, "libavutil.1.dylib")
 
-    def test_qualify_checks_artifact_manifest_and_propagates_script_status(self):
-        target = "aarch64-apple-darwin"
-        manifest_path = self.write_package_stage(target, "e" * 40)
-        stage = manifest_path.parents[2]
+    def qualification_fixture(self, target, profile_name):
+        manifest_path = self.write_package_stage(target, "e" * 40, profile_name)
         version = build.load_sources()["ffmpeg"].version
-        name = f"ffmpeg-tools-{version}-{target}"
+        name = f"ffmpeg-{profile_name}-{version}-{target}"
         archive = pathlib.Path(self.temp.name) / f"{name}.tar.xz"
         manifest = json.loads(manifest_path.read_text())
         manifest.update({
@@ -356,6 +354,13 @@ class StageTests(unittest.TestCase):
             "system_libraries": [], "toolchain": {}, "license": "gpl",
         })
         manifest["release"] = {"archive": archive.name}
+        return archive, manifest_path, manifest
+
+    def test_qualify_checks_artifact_manifest_and_propagates_script_status(self):
+        target = "aarch64-apple-darwin"
+        archive, manifest_path, manifest = self.qualification_fixture(target, "tools")
+        stage = manifest_path.parents[2]
+        name = archive.name.removesuffix(".tar.xz")
         manifest_path.write_text(json.dumps(manifest))
         work = pathlib.Path(self.temp.name) / "qualification"
 
@@ -406,6 +411,80 @@ class StageTests(unittest.TestCase):
             self.assertIn("non-normalized owner or mtime", stdout.getvalue())
             runner.assert_not_called()
             self.assertFalse((work / "qualify" / name / "path with spaces" / name).exists())
+
+    def test_qualify_runtime_checks_extracted_library_bytes_and_links(self):
+        for target, suffix, identity in (
+            ("aarch64-apple-darwin", "dylib", "install_name"),
+            ("x86_64-unknown-linux-musl", "so", "soname"),
+        ):
+            with self.subTest(target=target):
+                self.check_runtime_qualification(target, suffix, identity)
+
+    def check_runtime_qualification(self, target, suffix, identity):
+        archive, manifest_path, manifest = self.qualification_fixture(target, "runtime")
+        stage = manifest_path.parents[2]
+        libraries = {}
+        for library in build.RUNTIME_LIBRARIES:
+            file = f"lib/{library}.1.{suffix}"
+            link = f"lib/{library}.{suffix}"
+            (stage / f"lib/{library}.dylib").rename(stage / file)
+            (stage / link).symlink_to(pathlib.Path(file).name)
+            libraries[library] = {
+                "file": file, "links": [link], identity: pathlib.Path(file).name,
+                "sha256": hashing.sha256_file(stage / file),
+            }
+        manifest["libraries"] = libraries
+        manifest_path.write_text(json.dumps(manifest))
+        name = archive.name.removesuffix(".tar.xz")
+        work = pathlib.Path(self.temp.name) / "qualification"
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)) as runner,
+        ):
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(build.qualify(archive), 0)
+            command = runner.call_args.args[0]
+            self.assertEqual(pathlib.Path(command[1]).name, "qualify-runtime.sh")
+
+            avutil = stage / f"lib/libavutil.1.{suffix}"
+            avutil.write_bytes(b"changed binary")
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn("libavutil: sha256 mismatch", stdout.getvalue())
+
+            avutil.write_bytes(b"fixture")
+            link = stage / f"lib/libavutil.{suffix}"
+            link.unlink()
+            link.symlink_to(f"libavcodec.1.{suffix}")
+            build.release.create_archive(stage, archive, mtime=0, prefix=name)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(build.qualify(archive), 1)
+            self.assertIn(f"libavutil: lib/libavutil.{suffix} does not resolve", stdout.getvalue())
+
+    def test_qualify_test_only_profile_selects_fixture_script(self):
+        target = "x86_64-unknown-linux-musl"
+        archive, manifest_path, manifest = self.qualification_fixture(target, "fixtures")
+        manifest_path.write_text(json.dumps(manifest))
+        name = archive.name.removesuffix(".tar.xz")
+        build.release.create_archive(manifest_path.parents[2], archive, mtime=0, prefix=name)
+        work = pathlib.Path(self.temp.name) / "qualification"
+        with (
+            mock.patch.object(build, "TMP_ROOT", work),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build.subprocess, "run", return_value=mock.Mock(returncode=0)) as runner,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(build.qualify(archive), 0)
+        runner.assert_called_once_with(
+            ["bash", str(build.ROOT / "tests" / "qualify-fixtures.sh"),
+             str(work / "qualify" / name / "path with spaces" / name), target],
+            check=False,
+        )
 
     def test_archive_member_problems(self):
         escape = build.tarfile.TarInfo("root/../evil")
