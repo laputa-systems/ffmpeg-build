@@ -302,6 +302,38 @@ SHA-256 was `a72dfd058ada8f22be12013d641ca4fbb5feeecceb734dedbfb06d5b31e8e8b0`.
 No release was published. Other profile and target combinations remain
 outside this run. [Hosted runtime run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44333488976)
 
+The native ARM64 macOS run at `d1b6ee5bc264510f5847c1923fafc5f969db8ac1`
+passed `make build verify TARGET=aarch64-apple-darwin` with Xcode 27.2
+(27B52), Python 3.15.2 and two compiler jobs. Generate the fixture media
+first with `scripts/linux-fixtures.sh` in the pinned ARM64 image. The
+SDK and runtime both linked their external consumers and decoded H.264
+and AV1. The tools and runtime passed all 55 media workflow cases.
+This is a local artifact run with the installed Xcode, alongside the
+separate release workflow that selects Xcode 27.1.
+
+Native ARM64 Linux at trial head `4fd1ee747f6eacb6800ec2d0e53ad74a4a15052f`
+also built, audited and verified all three profiles using the release
+inputs. The static SDK, tools media workflows and external shared-library
+consumer all passed. [Hosted ARM64 qualification](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44336453427/job/134914388704)
+
+Native x86-64 Linux at the same trial head passed all four profiles,
+including the test-only fixture tools, which passed their 13 packaged
+checks. The SDK, production tools and runtime passed the corresponding
+consumer and media checks. [Hosted x86-64 qualification](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44336453427/job/134914388130)
+
+| Target | Profile | SHA-256 |
+| --- | --- | --- |
+| ARM64 macOS | play-sdk | `68bb8a5f39f52b0516950a79253c932628ea341443ac28db4dc464d727776e3e` |
+| ARM64 macOS | runtime | `973ae984bbedef16986c5e9bc886aab028eb0120e2d1f008b68203e49e277a1e` |
+| ARM64 macOS | tools | `b7c62de112b6274a2dfc0214d3ca68784947312c616e8f4269ccdda52f46ba0a` |
+| ARM64 Linux musl | play-sdk | `2f9ea9dcc50aa66bc23013315a4389841e760863a07f758dce5a98ac7458f2c8` |
+| ARM64 Linux musl | runtime | `04c1657d358e5c31440198ebac337ba9926a7c35b9b2198ac717f67e16ea58bd` |
+| ARM64 Linux musl | tools | `41edbbc9d6fff2bb96374102cb6201a7d0b89c8ea58d8cbdb4fd81901ab025ec` |
+| x86-64 Linux musl | fixtures | `147b9aa1ad592544d59f31da18ba18bcebd15f4948f04238879c33efefcac71f` |
+| x86-64 Linux musl | play-sdk | `7a97ed0a4f1884dfed26bf5c9ace009248eebbb597659545f3efe5c4f151acc9` |
+| x86-64 Linux musl | runtime | `b805e70d9b8116c1e7a0ec868b77b16acc32b6071be53a071cb8c28259f9470b` |
+| x86-64 Linux musl | tools | `47b1dc2ff67140925c827e6dc747382076281b66954cab178233145baa025458` |
+
 ## Tickets
 
 
