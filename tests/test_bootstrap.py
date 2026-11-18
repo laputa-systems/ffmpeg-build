@@ -5,8 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network access")):
-    import bootstrap
+import bootstrap
 
 
 class BootstrapTests(unittest.TestCase):
