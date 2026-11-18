@@ -74,8 +74,9 @@ Three survivors are equivalent for the declared artifact inputs:
 `check_manifest` mutation 5 splits a stem with one exact version separator;
 `assemble` mutations 36 and 38 pass a falsey value or omit the default-false
 `exist_ok` argument. `main` mutation 16 uppercases the lock filename. Both
-spellings resolve to the same inode on the local macOS volume. A case-sensitive
-hosted filesystem is required to classify that identity there.
+spellings resolve to the same inode on the local macOS volume. The
+case-sensitive Linux ARM64 trial caught that identity and reconciled all 153,
+with 150 caught and the same three equivalents. [Hosted run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44296342661)
 
 The earlier archive-commit test changed the sidecar and the archive together,
 so the sidecar rejected the fixture first. The updated fixture changes only
@@ -83,6 +84,14 @@ the archive commit. Direct controls also cover incorrect output-directory
 creation, usage status, duplicate and missing assets, the sidecar diagnostic,
 and preservation of an existing destination. The 82-test ordinary suite
 and Ruff and ty passed.
+
+
+The controller process tests cover the locked version, invalid profile
+target, and missing package flag. A wrong version, false success status,
+and optional profile flag each failed its own test. Restoring the controller
+passed all three controls and the 85-test suite. The subprocess coverage
+run combined four files and measured 774 of 1,466 statements and 325 of
+588 branches. Native build and qualification paths retain separate checks.
 
 ## Tickets
 
