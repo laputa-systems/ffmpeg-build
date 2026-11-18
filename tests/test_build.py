@@ -281,6 +281,27 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(path.read_text(), original)
                     self.assertFalse(dist.exists())
 
+    def test_manifest_reader_reports_present_and_missing_stage_files(self):
+        target = "aarch64-apple-darwin"
+        stage = self.stage / target / "tools"
+        expected = stage / "share" / "ffmpeg-build" / "manifest.json"
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            check = build.Audit()
+            self.assertEqual(build.read_manifest(check, stage), {})
+            self.assertEqual(check.finish(), 1)
+        self.assertEqual(stdout.getvalue().splitlines(), [
+            f"FAIL audit: manifest readable: missing {expected}", "TOTAL 0 passed, 1 failed",
+        ])
+
+        self.assertEqual(self.write_package_stage(target, "e" * 40), expected)
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            check = build.Audit()
+            self.assertEqual(build.read_manifest(check, stage), json.loads(expected.read_text()))
+            self.assertEqual(check.finish(), 0)
+        self.assertEqual(stdout.getvalue().splitlines(), ["PASS audit: manifest readable", "TOTAL 1 passed, 0 failed"])
+
     def test_stage_manifest_rejects_invalid_json_before_writing(self):
         target = "aarch64-apple-darwin"
         path = self.write_package_stage(target, "e" * 40)
