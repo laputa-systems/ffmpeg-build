@@ -32,6 +32,39 @@ the ordinary checks. The missing CLI assertions and the stage-provenance
 finding remain open. This coverage baseline measures execution. The
 mutation selection and survivor dispositions are still required for DSLP-4.
 
+
+Release archive acceptance at base `bde17f5` selected the 35 mutations in
+`archive_commit` with mutmut 3.8.1 and pytest 9.2.0 on macOS ARM64.
+The original tests caught 28. The added cases catch the other seven:
+r:xz replaced by automatic compression, two lost missing/non-file diagnostics,
+two lost malformed-object diagnostics, and two changes to the missing producer
+default. All 35 now have exit code 1 from their tests. Four direct controls
+checked wrong compression, an absent producer, the malformed-object diagnostic,
+and the missing-member diagnostic. Reverting the controls restored all nine
+release tests. The full uninstrumented controller suite passed 79 tests.
+
+To reproduce, unpack `git archive HEAD` into a fresh directory under
+`.work/tmp`. Populate its `.work/cache/sources` with the verified wheel
+from a normal `make test`. Copy `.github/scripts/assemble_release.py`
+byte-for-byte to `ci/release/assemble_release.py` in that directory. Adjust
+the release test's `spec_from_file_location` name and path to
+`ci.release.assemble_release` and `ci/release/assemble_release.py` in
+the scratch copy. Append the following to its `pyproject.toml`:
+
+```toml
+[tool.mutmut]
+source_paths = ["ci/release/assemble_release.py"]
+also_copy = ["tests", "build.py", "bootstrap.py", "sources.lock.json", "profiles", ".work/cache/sources"]
+pytest_add_cli_args_test_selection = ["tests/test_assemble_release.py"]
+use_setproctitle = false
+```
+
+From that directory with a repo-owned `TMPDIR`, run
+`cpu-guard --cores 2 -- uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python -m mutmut run --max-children 1 '*archive_commit*'`.
+Read the 35 matching keys in `mutants/ci/release/assemble_release.py.meta`
+under `exit_code_by_key`. The alternate import path matches mutmut's
+module naming. The wider release functions and controller remain open.
+
 ## Tickets
 
 

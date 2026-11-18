@@ -8,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from typing import Literal
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("assemble_release", ROOT / ".github" / "scripts" / "assemble_release.py")
@@ -21,6 +22,7 @@ from bootstrap import release
 COMMIT = "c" * 40
 LOCK = "a" * 64
 VERSION = "9.0.2"
+ARCHIVE_MANIFEST = "asset/share/ffmpeg-build/manifest.json"
 
 
 class AssembleReleaseTests(unittest.TestCase):
@@ -94,19 +96,50 @@ class AssembleReleaseTests(unittest.TestCase):
                 self.write_assets(stems, lock="b" * 64), self.root / "release", VERSION, COMMIT, LOCK
             )
 
-    def test_archive_commit_rejects_non_string_commit_and_preserves_absence(self):
+    def write_archive(
+        self, member: tarfile.TarInfo | None, payload: bytes = b"", *, mode: Literal["w:xz", "w:gz"] = "w:xz"
+    ) -> pathlib.Path:
         archive = self.root / "asset.tar.xz"
-        for manifest, expected in [({"producer": {"commit": 42}}, ValueError), ({"producer": {}}, None)]:
-            payload = json.dumps(manifest).encode()
-            with tarfile.open(archive, "w:xz") as tar:
-                member = tarfile.TarInfo("asset/share/ffmpeg-build/manifest.json")
+        with tarfile.open(archive, mode) as tar:
+            if member is not None:
                 member.size = len(payload)
                 tar.addfile(member, io.BytesIO(payload))
-            if expected is ValueError:
-                with self.assertRaisesRegex(ValueError, "commit"):
+        return archive
+
+    def test_archive_commit_rejects_invalid_manifest_fields(self):
+        cases = (
+            ([], TypeError, "invalid archive manifest"),
+            ({"producer": []}, TypeError, "invalid producer"),
+            ({"producer": {"commit": 42}}, ValueError, "invalid commit"),
+        )
+        for manifest, error, message in cases:
+            with self.subTest(manifest=manifest):
+                archive = self.write_archive(tarfile.TarInfo(ARCHIVE_MANIFEST), json.dumps(manifest).encode())
+                with self.assertRaisesRegex(error, message):
                     assemble_release.archive_commit(archive)
-            else:
+
+    def test_archive_commit_returns_none_for_absent_commit(self):
+        for manifest in ({}, {"producer": {}}, {"producer": {"commit": None}}):
+            with self.subTest(manifest=manifest):
+                archive = self.write_archive(tarfile.TarInfo(ARCHIVE_MANIFEST), json.dumps(manifest).encode())
                 self.assertIsNone(assemble_release.archive_commit(archive))
+
+    def test_archive_commit_identifies_missing_or_non_file_manifest(self):
+        directory = tarfile.TarInfo(ARCHIVE_MANIFEST)
+        directory.type = tarfile.DIRTYPE
+        cases = (
+            (None, f"has no {ARCHIVE_MANIFEST}"),
+            (directory, f"{ARCHIVE_MANIFEST} is not a file"),
+        )
+        for member, message in cases:
+            with self.subTest(member=member), self.assertRaisesRegex(ValueError, message):
+                assemble_release.archive_commit(self.write_archive(member))
+
+    def test_archive_commit_rejects_non_xz_compression(self):
+        manifest = json.dumps({"producer": {"commit": COMMIT}}).encode()
+        archive = self.write_archive(tarfile.TarInfo(ARCHIVE_MANIFEST), manifest, mode="w:gz")
+        with self.assertRaises(tarfile.ReadError):
+            assemble_release.archive_commit(archive)
 
     def test_names_match_build_naming(self):
         for stem in assemble_release.expected_stems(VERSION):
