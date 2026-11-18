@@ -1205,6 +1205,17 @@ def parse_stage_manifest(path: pathlib.Path) -> dict:
     manifest: object = json.loads(path.read_text())
     if not isinstance(manifest, dict):
         raise TypeError("manifest root must be an object")
+    sources = manifest.get("sources", {})
+    if not isinstance(sources, dict):
+        raise TypeError("manifest sources must be an object")
+    for name, source in sources.items():
+        if not isinstance(source, dict):
+            raise TypeError(f"manifest source {name} must be an object")
+    producer = manifest.get("producer", {})
+    if not isinstance(producer, dict):
+        raise TypeError("manifest producer must be an object")
+    if not isinstance(producer.get("commit", ""), str):
+        raise TypeError("manifest producer.commit must be a string")
     return manifest
 
 

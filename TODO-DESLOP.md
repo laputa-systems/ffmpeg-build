@@ -367,6 +367,31 @@ one worker in the usual sealed controller layout. Select
 `x_gnu_stack_size`, `x_audit_runtime_elf`, and `x_audit_runtime_macho`.
 The full 117-test suite and both linters passed.
 
+The full `build.py` mutation inventory at
+`aa4f74741638ef3762a324b2e687b1509b0c62f1` has 5,600 identities.
+On macOS ARM64, mutmut 3.8.1 and pytest 9.2.0 recorded 2,124 test
+failures, 664 survivors, and 2,812 identities with no test
+selection. Neither no-test entries nor survivors count as catches.
+The largest no-test groups are the audit dispatcher (696), runtime
+audit (373), SDK audit (288) and tools audit (232). Native runs exercise
+those paths against real artifacts. The ordinary test gate still needs
+controlled stage cases that detect audit failures.
+
+To reproduce the inventory, use the scratch recipe for `build.py`
+above, add `patches`, `scripts`, `Makefile` and `.github/scripts` to
+`also_copy`, and select `tests/test_build.py` and `tests/test_cli.py`.
+Run `mutmut run --max-children 1 'build.*'` and classify all
+`exit_code_by_key` entries in `mutants/build.py.meta`. Mutmut's exit code
+33 identifies entries with no selected tests in this version.
+
+Audit and package both parse the staged manifest. Previous validation
+accepted a list for the source or producer map, a null source record,
+and a numeric producer commit. Downstream package access then failed
+outside its normal diagnostics. The parser now rejects those records,
+and the fixture checks both diagnostics, intact input bytes, and the
+absence of output. Missing fields still use the existing consumer
+checks.
+
 ## Tickets
 
 
