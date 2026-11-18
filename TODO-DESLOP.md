@@ -352,6 +352,21 @@ Run the five function patterns above with one worker under mutmut 3.8.1
 and pytest 9.2.0. All 115 ordinary tests, Ruff and ty passed. The
 whole-change workflow remains open.
 
+The native runtime loader audit at `511b46b3` now has sealed ELF and
+Mach-O command fixtures for both programs and shared libraries. They
+check CPU and file identity, dependencies, relocation paths, stack
+size, musl interpreter, code signatures, and bounded failure details.
+The separate packaged native runs remain the real-tool evidence.
+
+The first fixture set caught 275 of 305 mutations. Exact failure details,
+an independent ELF file-kind mismatch, a profile framework and bounded
+symbol diagnostics caught all 30 remaining identities. Both generated
+sources compared byte for byte. Run mutmut 3.8.1 and pytest 9.2.0 with
+one worker in the usual sealed controller layout. Select
+`tests/test_build.py -k RuntimeLinkAuditTests` and the function patterns
+`x_gnu_stack_size`, `x_audit_runtime_elf`, and `x_audit_runtime_macho`.
+The full 117-test suite and both linters passed.
+
 ## Tickets
 
 
