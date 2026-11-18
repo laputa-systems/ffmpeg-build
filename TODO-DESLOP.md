@@ -17,6 +17,21 @@ Types (DSLP-3), scoped to bootstrap and release assembly at `32535b71`: adopted 
 
 Measured with pinned ty 0.0.101 and Ruff 0.17.4: ty `missing-type-argument`, `unused-ignore-comment`, `blanket-ignore-comment`, `disjoint-cast`, `dynamic-function-decorator-return`, `possibly-unresolved-reference`, `unsound-yield` and `unsupported-dynamic-base` each found 0; `unsound-assignment` found one temporary boundary assignment during implementation and 0 after narrowing. Ruff `ANN401`, `PGH003`, `TC`, `B` and `RET` found 0; `ANN` found 446 initially (447 after the new test helper). These settings were not adopted: zero findings provide no defect witness, and the broad annotation family concerns unrelated untyped internals. Those internals remain deferred; green ty does not prove them sound. No full build, external consumer qualification, or release was run; the release assembly tests exercise the candidate directly. DSLP-6 remains independent.
 
+
+Tests (DSLP-4) branch coverage baseline at `189a083` used coverage.py 7.17.3
+and all 76 controller tests on macOS ARM64. `make coverage` measured
+746 of 1,466 statements and 313 of 588 branches across `build.py`,
+`bootstrap.py`, and the release assembly script. The normal suite passed
+twice, each in 1.19 s under `cpu-guard --cores 2` with a warm environment.
+
+The controller suite covers profile and lock validation, wheel cache reuse,
+archive layout, and release asset assembly. It uses sealed stage fixtures
+and runs separately from native qualification. Compiler and dependency build
+paths, runtime archive probes, and the top-level CLI dispatch remain outside
+the ordinary checks. The missing CLI assertions and the stage-provenance
+finding remain open. This coverage baseline measures execution. The
+mutation selection and survivor dispositions are still required for DSLP-4.
+
 ## Tickets
 
 

@@ -19,7 +19,7 @@ build_profile = $(PYTHON) build.py build --target $(TARGET) --profile $(1) && $(
 verify_archive = $(PYTHON) build.py qualify --archive $(1)
 endif
 
-.PHONY: fetch build package verify lint test clean
+.PHONY: coverage fetch build package verify lint test clean
 
 fetch:
 	@set -eu; for profile in $(PROFILES); do $(PYTHON) build.py fetch --target $(TARGET) --profile $$profile; done
@@ -40,6 +40,12 @@ verify:
 
 test:
 	uv run --frozen python -m unittest discover -s tests
+
+coverage:
+	mkdir -p .work/coverage
+	uv run --frozen coverage run -m unittest discover -s tests
+	uv run --frozen coverage report
+	uv run --frozen coverage json -o .work/coverage/report.json
 
 lint:
 	uv run --frozen ruff check .

@@ -35,6 +35,7 @@ python3 -m unittest discover -s tests
 ## Verification
 
 - On macOS arm64, `make test`: cold 0.41s (created `.venv`), warm 0.28s; 73 tests each. `make lint`: first 0.57s, warm 0.12s (after test setup). Times are elapsed, not performance gates.
+- `make coverage` runs the controller suite with branch instrumentation over the three first-party Python modules. It prints a summary and writes `.work/coverage/report.json`.
 - `build.py` commands, flags and exit codes; Makefile and Linux wrapper entry points: none at the CLI boundary. `tests/test_build.py` exercises selected underlying functions.
 - `sources.lock.json` and profile configuration consumed by the builder: `tests/test_build.py` (`ProfileTests`, `RuntimeProfileTests`, `LicenseAndDeviceTests`, `FixturesProfileTests`); source download and full build: none in `make test`.
 - Archive names, members, symlinks and release manifests consumed by `play` and `usr`: `tests/test_build.py` (`StageTests`, `SymlinkTests`, `RuntimeStageTests`) and `tests/test_assemble_release.py`; full artifact qualification is `make verify` after a build.
