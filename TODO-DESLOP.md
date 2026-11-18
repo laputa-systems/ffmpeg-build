@@ -203,6 +203,45 @@ alter path case. The Linux ARM64 trial at `600b2a2` caught all four, for
 229 caught and the three equivalents. All 100 tests and both linters passed.
 [Hosted run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44311448379)
 
+The controller `main` selection at base `7e6b357` uses direct calls to the
+real parser with sealed dispatch fixtures, alongside the existing subprocess
+checks. It checks required arguments, help, version output, Python version
+rejection, dispatch arguments and return statuses. A separate archived fault
+that changed the audit return to zero failed the audit dispatch assertion
+(`0 != 17`). No native binary or download was invoked.
+
+With mutmut 3.8.1 and pytest 9.2.0, a fresh archive selected exactly 104
+`build.x_main__mutmut_*` identities: 102 killed (exit code 1), two survived
+(exit code 0), and none timed out or lacked tests. ID 1 changes `< (3, 12)`
+to `<= (3, 12)`; the tests exercise an actual-shaped 3.12 version tuple,
+but do not establish equivalence for all possible version values. ID 104
+changes the final fallback return from 2 to 3; the declared parser accepts
+only the six commands dispatched above, but the fallback's reachability has
+not been independently proven. Both remain open; neither is assumed equivalent.
+Other controller functions and native qualification remain open. The full
+107-test suite and Ruff and ty passed.
+
+To reproduce, archive this commit into a fresh directory under `.work/tmp`,
+copy the verified `laputa_buildlib-0.1.0-py3-none-any.whl` to its
+`.work/cache/sources`, and append the following to its `pyproject.toml`:
+
+```toml
+[tool.mutmut]
+source_paths = ["build.py"]
+also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles", ".work/cache/sources"]
+pytest_add_cli_args_test_selection = ["tests/test_cli.py"]
+use_setproctitle = false
+```
+
+Install the pinned tools into an ignored `.work/venv` from the restored mirror,
+set `TMPDIR` to the worktree's `.work/tmp`, and run from the archive with a
+120-second timeout: `cpu-guard --cores 2 -- <worktree>/.work/venv/bin/python -m
+mutmut run --max-children 1 '*x_main__mutmut_*'`. Count the matching keys and
+their `exit_code_by_key` values in `mutants/build.py.meta`. The initial
+subprocess-only baseline could not associate tests with the mutated function;
+adding the direct parser tests recovered the run and produced 88 killed and
+16 survivors before the final parser assertions.
+
 ## Tickets
 
 
