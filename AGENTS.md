@@ -36,6 +36,7 @@ python3 -m unittest discover -s tests
 
 - On macOS arm64, `make test`: cold 0.41s (created `.venv`), warm 0.28s; 73 tests each. `make lint`: first 0.57s, warm 0.12s (after test setup). Times are elapsed, not performance gates.
 - `make coverage` runs the controller suite with branch instrumentation over the three first-party Python modules. It prints a summary and writes `.work/coverage/report.json`.
+- For package and qualification edits, `uv run --frozen python -m unittest discover -s tests -p test_build.py -k qualify` checks a sealed tools archive, manifest and native-script handoff. `make test` adds controller and release assembly coverage. `make verify` requires native artifacts.
 - `tests/test_cli.py` exercises the `build.py` version command, target rejection, and required package arguments through the process boundary. The Makefile and native Linux wrapper have separate usage paths.
 - `sources.lock.json` and profile configuration consumed by the builder: `tests/test_build.py` (`ProfileTests`, `RuntimeProfileTests`, `LicenseAndDeviceTests`, `FixturesProfileTests`); source download and full build: none in `make test`.
 - Archive names, members, symlinks and release manifests consumed by `play` and `usr`: `tests/test_build.py` (`StageTests`, `SymlinkTests`, `RuntimeStageTests`) and `tests/test_assemble_release.py`; full artifact qualification is `make verify` after a build.

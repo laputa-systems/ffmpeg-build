@@ -107,14 +107,32 @@ Package mutation at `4bf7f06` selected 186 identities in `package` and
 one stage path component or the lock filename on the case-folded macOS
 volume. One changes the missing commit default from an empty string to
 `XXXX`. Both fail the same 40-character lowercase hexadecimal check. The
-case-sensitive run is tracked separately.
+case-sensitive Linux ARM64 run caught all four, for 185 caught and one
+commit-default equivalent at the exact trial head `87634f5`.
+[Hosted run](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44300718449)
 
 Reproduce with the scratch archive and cached wheel described above, leaving
 `build.py` at the root. Set `source_paths = ["build.py"]` and
 `pytest_add_cli_args_test_selection = ["tests/test_build.py"]`, and omit
 `build.py` from `also_copy`. Select `'*x_package__mutmut_*'` and
 `'*x_mismatched_source_pins__mutmut_*'`. The ordinary controller suite passed
-90 tests. Subprocess coverage measured 794 of 1,472 statements.
+90 tests. Subprocess coverage measured 794 of 1,472 statements and 333 of
+590 branches.
+
+
+Qualification now exercises an extracted tools archive and its manifest with a
+controlled native script result. The test checks the selected script and path
+with spaces, locked source pins, malformed JSON, and non-normalized metadata
+that must stop before extraction. Forcing the script's failed exit to pass
+reproduced a false success and failed the new test. Across identical source at
+`53d427e`, mutmut selected 359 `qualify`, `archive_member_problems`, and
+`read_manifest` identities under the package setup above. The base caught
+25, with 10 live and 324 lacking tests. The new case caught 240, with 119 live.
+The breakdown is 193/285, 27/35 and 20/39 caught, respectively. The survivors
+remain open, including special profiles, runtime-library checks and archive
+member paths. The 91-test suite passed with 857/1,472 statements and 342/590
+branches covered. Native producer/consumer checks retain their manual release
+boundary and were not executed by the test.
 
 ## Tickets
 
@@ -124,7 +142,7 @@ Reproduce with the scratch archive and cached wheel described above, leaving
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and mutation results are unmeasured; no deslop mutation lane exists.
+- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. Qualification survivors, native effects, and a fail-closed whole-change mutation lane remain open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M
