@@ -93,6 +93,13 @@ passed all three controls and the 85-test suite. The subprocess coverage
 run combined four files and measured 774 of 1,466 statements and 325 of
 588 branches. Native build and qualification paths retain separate checks.
 
+
+Packaging now uses the audit and qualification source-pin check before
+writing the archive or sidecar. The DSLP-6 witness failed on the prior
+revision and now rejects a stale dav1d digest with the staged manifest
+unchanged and no output directory. A valid tools stage produced identical
+archive bytes before and after. All 86 tests and both linters passed.
+
 ## Tickets
 
 
@@ -114,14 +121,3 @@ run combined four files and measured 774 of 1,466 statements and 325 of
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
-
-
-### DSLP-6 · P2 · Packaging can attest a lock that did not produce the stage
-
-- **Area:** artifact provenance
-- **Where:** build.py:1984, build.py:2008, build.py:2119, tests/test_build.py:174
-- **Problem:** package checks only the staged FFmpeg version before writing the current sources.lock.json digest into the sidecar; it does not compare the stage's dependency hashes with that lock. A sealed tools stage with a dav1d SHA-256 of 64 zeroes, otherwise matching the current FFmpeg version and producer commit, passed build.package and produced a sidecar claiming the current lock digest. A stage left over after a dependency pin changes can therefore acquire a misleading provenance sidecar. qualify later checks source hashes, but package is also a standalone documented operation and its sidecar is already emitted.
-- **Recommendation:** Before writing the archive and sidecar, reject a stage whose recorded sources do not match the current profile's lock entries; cover a stale dependency pin with a sealed package fixture. Preserve the producer commit as the build's actual revision.
-- **Fix with:** durable-state
-- **Effort:** S
-
