@@ -340,11 +340,19 @@ class StageTests(unittest.TestCase):
             self.assertEqual(check.finish(), 0)
         self.assertEqual(stdout.getvalue().splitlines(), ["PASS audit: manifest readable", "TOTAL 1 passed, 0 failed"])
 
-    def test_stage_manifest_rejects_invalid_json_before_writing(self):
+    def test_stage_manifest_rejects_malformed_records_before_writing(self):
         target = "aarch64-apple-darwin"
         path = self.write_package_stage(target, "e" * 40)
         dist = pathlib.Path(self.temp.name) / "dist"
-        cases = (("[]", "manifest root must be an object"), ("{", "Expecting property name"))
+        valid = json.loads(path.read_text())
+        cases = (
+            ("[]", "manifest root must be an object"),
+            ("{", "Expecting property name"),
+            (json.dumps(valid | {"sources": []}), "manifest sources must be an object"),
+            (json.dumps(valid | {"sources": {"ffmpeg": None}}), "manifest source ffmpeg must be an object"),
+            (json.dumps(valid | {"producer": []}), "manifest producer must be an object"),
+            (json.dumps(valid | {"producer": {"commit": 12}}), "manifest producer.commit must be a string"),
+        )
         with mock.patch.object(build, "DIST", dist), mock.patch.object(build, "STAGE_ROOT", self.stage):
             for contents, message in cases:
                 with self.subTest(contents=contents):
