@@ -1,0 +1,33 @@
+name: native runtime trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  runtime:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Build, audit, package and qualify the Linux runtime
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          python=$(uv python find 3.15)
+          target=x86_64-unknown-linux-musl
+          make build verify TARGET="$target" PROFILES=runtime PYTHON="$python"
+          git diff --exit-code
+          sha256sum dist/ffmpeg-runtime-*-"$target".tar.xz
