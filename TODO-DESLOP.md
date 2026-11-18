@@ -266,3 +266,42 @@ adding the direct parser tests recovered the run and produced 88 killed and
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
+
+Bootstrap cache mutation at base `644c6ff72533b2a955d2116aa8d51583e7faabed`
+selected the same 75 `_wheel` and `_digest` identities in fresh before and
+candidate archives on macOS ARM64, with mutmut 3.8.1 and pytest 9.2.0. The
+before results were 40 caught (exit 1) and 35 survived (exit 0); the candidate
+results were 70 caught and five survived, with no other result classes. A
+local-byte transport fixture exercises cache miss, hit, replacement, bad
+bytes, and transport failure. Reversing the staged digest comparison in a
+separate archive made the download test fail on the valid fixture.
+
+Five outcomes remain unresolved: `_wheel` IDs 5 and 62 change the case of
+`sources.lock.json` and `.part`; this volume resolves those spellings to the
+same files, so a case-sensitive run is needed. IDs 8, 16 and 20 surround the
+three malformed-lock diagnostics with `XX`; the tests check the diagnostic
+substring, not exact spelling. These are diagnostic-only survivors, not
+claims of equivalence. Native builds, actual network downloads in these tests,
+and the wider DSLP-4 mutation scope remain open.
+
+To reproduce, make two fresh directories under `.work/tmp` and unpack
+`git archive 644c6ff72533b2a955d2116aa8d51583e7faabed` into each. Copy this
+commit's `tests/test_bootstrap.py` into the candidate only. Run normal
+`make test` in the worktree to fetch the pinned verified buildlib wheel, then
+copy `.work/cache/sources/laputa_buildlib-0.1.0-py3-none-any.whl` to the same
+relative location in both archives. Append this configuration to each
+archive's `pyproject.toml`:
+
+```toml
+[tool.mutmut]
+source_paths = ["bootstrap.py"]
+also_copy = ["tests", "sources.lock.json", ".work/cache/sources"]
+pytest_add_cli_args_test_selection = ["tests/test_bootstrap.py"]
+use_setproctitle = false
+```
+
+Install mutmut 3.8.1 and pytest 9.2.0 from the mirror in `.work/venv`. From
+each archive, set `TMPDIR` to the worktree's `.work/tmp` and run
+`timeout 120 cpu-guard --cores 2 -- <worktree>/.work/venv/bin/python -m mutmut run --max-children 1 '*x__wheel__mutmut_*' '*x__digest__mutmut_*'`.
+Compare the keys and `exit_code_by_key` values in `mutants/bootstrap.py.meta`;
+the command's success alone does not classify survivors.
