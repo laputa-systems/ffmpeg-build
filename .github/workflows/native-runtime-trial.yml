@@ -1,4 +1,4 @@
-name: native runtime trial
+name: native Linux artifact trial
 
 on: pull_request
 
@@ -9,11 +9,21 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  runtime:
-    runs-on: ubuntu-26.04
+  artifacts:
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 50
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-26.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-26.04-arm
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -22,12 +32,11 @@ jobs:
         with:
           version: 0.13.7
       - run: uv python install 3.15
-      - name: Build, audit, package and qualify the Linux runtime
+      - name: Build, audit, package and qualify every supported profile
         run: |
           export TMPDIR="$PWD/.work/tmp"
           mkdir -p "$TMPDIR"
           python=$(uv python find 3.15)
-          target=x86_64-unknown-linux-musl
-          make build verify TARGET="$target" PROFILES=runtime PYTHON="$python"
+          make build verify TARGET="$TARGET" PYTHON="$python"
           git diff --exit-code
-          sha256sum dist/ffmpeg-runtime-*-"$target".tar.xz
+          sha256sum dist/ffmpeg-*-"$TARGET".tar.xz
