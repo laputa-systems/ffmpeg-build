@@ -38,10 +38,10 @@ def archive_commit(path: Path) -> str | None:
             raise ValueError(f"{path.name}: {member} is not a file")
         manifest: object = json.load(handle)
         if not isinstance(manifest, dict):
-            raise ValueError(f"{path.name}: invalid archive manifest")
+            raise TypeError(f"{path.name}: invalid archive manifest")
         producer: object = manifest.get("producer", {})
         if not isinstance(producer, dict):
-            raise ValueError(f"{path.name}: invalid producer")
+            raise TypeError(f"{path.name}: invalid producer")
         commit: object = producer.get("commit")
         if commit is not None and not isinstance(commit, str):
             raise ValueError(f"{path.name}: invalid commit")
@@ -100,7 +100,7 @@ def main() -> int:
             commit,
             lock_sha256,
         )
-    except (OSError, ValueError, release.ReleaseError) as error:
+    except (OSError, TypeError, ValueError, release.ReleaseError) as error:
         print(f"assemble failed: {error}", file=sys.stderr)
         return 1
     print("\n".join(assets))

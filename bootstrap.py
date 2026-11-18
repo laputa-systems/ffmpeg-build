@@ -18,13 +18,13 @@ def _digest(path: Path) -> str:
 def _wheel() -> Path:
     lock: object = json.loads((ROOT / "sources.lock.json").read_text())
     if not isinstance(lock, dict):
-        raise ValueError("invalid sources lock")
+        raise TypeError("invalid sources lock")
     inputs: object = lock.get("inputs")
     if not isinstance(inputs, list):
-        raise ValueError("invalid sources lock inputs")
+        raise TypeError("invalid sources lock inputs")
     for item in inputs:
         if not isinstance(item, dict):
-            raise ValueError("invalid sources lock input")
+            raise TypeError("invalid sources lock input")
         if item.get("name") == PIN:
             pin = item
             break
@@ -34,11 +34,11 @@ def _wheel() -> Path:
     url: object = pin.get("url")
     sha256: object = pin.get("sha256")
     if not isinstance(filename, str):
-        raise ValueError(f"invalid {PIN} filename")
+        raise TypeError(f"invalid {PIN} filename")
     if not isinstance(url, str):
-        raise ValueError(f"invalid {PIN} url")
+        raise TypeError(f"invalid {PIN} url")
     if not isinstance(sha256, str):
-        raise ValueError(f"invalid {PIN} sha256")
+        raise TypeError(f"invalid {PIN} sha256")
     path = CACHE / filename
     if path.is_file() and _digest(path) == sha256:
         return path
