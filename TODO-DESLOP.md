@@ -100,6 +100,22 @@ revision and now rejects a stale dav1d digest with the staged manifest
 unchanged and no output directory. A valid tools stage produced identical
 archive bytes before and after. All 86 tests and both linters passed.
 
+
+Package mutation at `4bf7f06` selected 186 identities in `package` and
+`mismatched_source_pins`, using mutmut 3.8.1 and pytest 9.2.0. The base caught
+134 and the new stage fixtures caught 181. Four remaining identities uppercase
+one stage path component or the lock filename on the case-folded macOS
+volume. One changes the missing commit default from an empty string to
+`XXXX`. Both fail the same 40-character lowercase hexadecimal check. The
+case-sensitive run is tracked separately.
+
+Reproduce with the scratch archive and cached wheel described above, leaving
+`build.py` at the root. Set `source_paths = ["build.py"]` and
+`pytest_add_cli_args_test_selection = ["tests/test_build.py"]`, and omit
+`build.py` from `also_copy`. Select `'*x_package__mutmut_*'` and
+`'*x_mismatched_source_pins__mutmut_*'`. The ordinary controller suite passed
+90 tests. Subprocess coverage measured 794 of 1,472 statements.
+
 ## Tickets
 
 
