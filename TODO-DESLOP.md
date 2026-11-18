@@ -245,6 +245,15 @@ subprocess-only baseline could not associate tests with the mutated function;
 adding the direct parser tests recovered the run and produced 88 killed and
 16 survivors before the final parser assertions.
 
+Release collection at `8e663213c4e352e48fe22c97a6727e0b48bb1b09`
+raised a raw `AttributeError` through the command when a sidecar contained
+valid JSON with a list root. The fixture writes the complete local asset
+inventory that the command ordinarily consumes. The parser now rejects a
+non-object root with the sidecar name before creating the destination.
+The same command fixture passes on the candidate, with exit 1, no output
+directory or stdout, and the expected error on stderr. The valid fixture
+still assembles all ten products with verified checksums. No release ran.
+
 ## Tickets
 
 
