@@ -334,6 +334,24 @@ consumer and media checks. [Hosted x86-64 qualification](https://github.com/lapu
 | x86-64 Linux musl | runtime | `b805e70d9b8116c1e7a0ec868b77b16acc32b6071be53a071cb8c28259f9470b` |
 | x86-64 Linux musl | tools | `47b1dc2ff67140925c827e6dc747382076281b66954cab178233145baa025458` |
 
+The runtime library and binary inspection slice at `82bcb481` accounted
+for all 218 identities in `library_layout`, `versioned_library_pattern`,
+`library_identity_name`, `elf_dynamic`, and `macho_load_commands`.
+The baseline caught 202 and left 16 survivors. The candidate caught
+all 218. The generated production files matched byte for byte.
+
+The layout fixture confirms a duplicate versioned library does not
+hide other libraries or unclaimed symlinks. The ELF fixture checks an
+uppercase hex tag, legacy multi-entry RPATH, standalone TEXTREL,
+unrelated bracketed metadata and absent SONAME. The Mach-O executable
+fixture verifies the absence of an install name.
+
+Use the existing scratch mutation recipe and select
+`tests/test_build.py -k 'LibraryLayoutTests or BinaryInspectionTests'`.
+Run the five function patterns above with one worker under mutmut 3.8.1
+and pytest 9.2.0. All 115 ordinary tests, Ruff and ty passed. The
+whole-change workflow remains open.
+
 ## Tickets
 
 

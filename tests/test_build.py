@@ -1019,6 +1019,21 @@ class LibraryLayoutTests(unittest.TestCase):
         _, problems = build.library_layout(regular, links, "linux")
         self.assertEqual(problems, ["libavcodec: lib/libavcodec.so does not resolve to lib/libavcodec.so.60.1.100"])
 
+    def test_layout_reports_duplicate_libraries_and_unclaimed_links(self):
+        regular, links = linux_runtime_tree()
+        regular.add("lib/libavcodec.so.60.2.100")
+        links["lib/libdav1d.so"] = "libdav1d.so.7.0.0"
+        layout, problems = build.library_layout(regular, links, "linux")
+        self.assertEqual(set(layout), set(build.RUNTIME_LIBRARIES) - {"libavcodec"})
+        self.assertEqual(problems, [
+            (
+                "libavcodec: expected one versioned library file, found "
+                "['lib/libavcodec.so.60.1.100', 'lib/libavcodec.so.60.2.100']"
+            ),
+            "unexpected files in lib/: ['lib/libavcodec.so.60.1.100', 'lib/libavcodec.so.60.2.100']",
+            "unexpected symlinks: ['lib/libavcodec.so', 'lib/libavcodec.so.60', 'lib/libdav1d.so']",
+        ])
+
 
 READELF_DYNAMIC = """
 Dynamic section at offset 0x1c3d8 contains 30 entries:
@@ -1057,6 +1072,25 @@ Load command 14
 
 
 class BinaryInspectionTests(unittest.TestCase):
+    def test_elf_records_legacy_rpath_and_standalone_textrel(self):
+        dynamic = build.elf_dynamic(
+            " 0x000A (RPATH) Library rpath: [$ORIGIN:$ORIGIN/lib]\n"
+            " 0x000B (TEXTREL) 0x0\n"
+            " 0x000C (AUXILIARY) Auxiliary library: [fixture.so]\n"
+        )
+        self.assertEqual(dynamic, {
+            "needed": [], "soname": None, "runpath": [],
+            "rpath": ["$ORIGIN", "$ORIGIN/lib"], "textrel": True,
+        })
+
+    def test_macho_executable_has_no_install_name(self):
+        commands = build.macho_load_commands(
+            "Load command 0\n"
+            "          cmd LC_LOAD_DYLIB\n"
+            "         name /usr/lib/libSystem.B.dylib (offset 24)\n"
+        )
+        self.assertEqual(commands, {"id": None, "rpaths": [], "loads": ["/usr/lib/libSystem.B.dylib"]})
+
     def test_elf_dynamic(self):
         dynamic = build.elf_dynamic(READELF_DYNAMIC)
         self.assertEqual(dynamic["needed"], ["libavutil.so.61", "libva.so.2", "libc.musl-x86_64.so.1"])
