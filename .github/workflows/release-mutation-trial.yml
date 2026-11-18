@@ -1,0 +1,63 @@
+name: Release assembly mutation trial
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  release-assembly:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Prove the whole assembly script on a case-sensitive filesystem
+        shell: bash -euo pipefail {0}
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          make test
+          candidate=$(mktemp -d "$TMPDIR/release-mutmut.XXXXXX")
+          git archive HEAD | tar -xf - -C "$candidate"
+          mkdir -p "$candidate/.work/cache" "$candidate/.work/tmp" "$candidate/ci/release"
+          cp -R .work/cache/sources "$candidate/.work/cache/sources"
+          cp .github/scripts/assemble_release.py "$candidate/ci/release/assemble_release.py"
+          cmp .github/scripts/assemble_release.py "$candidate/ci/release/assemble_release.py"
+          cd "$candidate"
+          export TMPDIR="$PWD/.work/tmp"
+          uv run --frozen python - <<'PY'
+          from pathlib import Path
+          assert not Path("SOURCES.LOCK.JSON").exists()
+          tests = Path("tests/test_assemble_release.py")
+          source = tests.read_text()
+          before = 'spec_from_file_location("assemble_release", ROOT / ".github" / "scripts" / "assemble_release.py")'
+          after = 'spec_from_file_location("ci.release.assemble_release", ROOT / "ci" / "release" / "assemble_release.py")'
+          assert source.count(before) == 1
+          tests.write_text(source.replace(before, after))
+          PY
+          cat >>pyproject.toml <<'TOML'
+
+          [tool.mutmut]
+          source_paths = ["ci/release/assemble_release.py"]
+          also_copy = ["tests", "build.py", "bootstrap.py", "sources.lock.json", "profiles", ".work/cache/sources"]
+          pytest_add_cli_args_test_selection = ["tests/test_assemble_release.py"]
+          use_setproctitle = false
+          TOML
+          timeout 120s uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python -m mutmut run --max-children 1
+          uv run --frozen python - <<'PY'
+          import json
+          from pathlib import Path
+          results = json.loads(Path("mutants/ci/release/assemble_release.py.meta").read_text())["exit_code_by_key"]
+          prefix = "ci.release.assemble_release.x_"
+          expected = {prefix + key for key in ("check_manifest__mutmut_5", "assemble__mutmut_36", "assemble__mutmut_38")}
+          non_kills = {key: code for key, code in results.items() if code != 1}
+          print(f"{len(results)} identities, {len(results) - len(non_kills)} caught, remaining {non_kills}")
+          assert len(results) == 153 and non_kills == dict.fromkeys(expected, 0)
+          PY
