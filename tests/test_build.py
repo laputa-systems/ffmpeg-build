@@ -598,7 +598,50 @@ class StageTests(unittest.TestCase):
         link.type = build.tarfile.SYMTYPE
         outside = build.tarfile.TarInfo("other/file")
         problems = build.archive_member_problems([escape, link, outside], "root")
-        self.assertEqual(len(problems), 3)
+        self.assertEqual(problems, [
+            "unsafe path root/../evil",
+            "outside root other/file",
+            "link: symlinks are allowed only directly in lib/",
+        ])
+
+    def test_archive_member_problems_reports_each_metadata_error(self):
+        wrong_owner = build.tarfile.TarInfo("root/owner")
+        wrong_owner.uid = 1
+        wrong_group = build.tarfile.TarInfo("root/group")
+        wrong_group.gid = 1
+        unsupported = build.tarfile.TarInfo("root/fifo")
+        unsupported.type = build.tarfile.FIFOTYPE
+        outside = build.tarfile.TarInfo("other/lib/alias")
+        outside.type = build.tarfile.SYMTYPE
+        outside.linkname = "missing"
+        self.assertEqual(build.archive_member_problems([wrong_owner, wrong_group, unsupported, outside], "root"), [
+            "non-normalized owner or mtime: root/owner",
+            "non-normalized owner or mtime: root/group",
+            "not a file, directory, or symlink: root/fifo",
+            "outside root other/lib/alias",
+        ])
+
+    def test_extracted_library_problems_preserves_each_missing_field_diagnostic(self):
+        payload = self.stage / "lib" / "payload.dylib"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"fixture library")
+        alias = payload.with_name("alias.dylib")
+        alias.symlink_to(payload.name)
+        unrelated = self.stage / "XXXX"
+        unrelated.write_bytes(b"unrelated archive file")
+        libraries = {
+            "libavcodec": {"file": "lib/missing.dylib"},
+            "libavdevice": {"sha256": hashing.sha256_file(unrelated), "install_name": "@rpath/libavdevice.dylib"},
+            "libavutil": {"file": "lib/payload.dylib", "sha256": hashing.sha256_file(payload)},
+            "libswscale": {"file": "lib/alias.dylib"},
+        }
+        self.assertEqual(build.extracted_library_problems(self.stage, libraries, "macos"), [
+            "libraries ['libavcodec', 'libavdevice', 'libavutil', 'libswscale']",
+            "libavcodec: lib/missing.dylib is not a regular file",
+            "libavdevice: None is not a regular file",
+            "libavutil: no install_name",
+            "libswscale: lib/alias.dylib is not a regular file",
+        ])
 
 
 SONAME_CHAIN = {
