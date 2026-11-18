@@ -63,8 +63,9 @@ class BootstrapTests(unittest.TestCase):
                 for lock, error, message in cases:
                     with self.subTest(lock=lock):
                         (root / "sources.lock.json").write_text(json.dumps(lock))
-                        with self.assertRaisesRegex(error, message):
+                        with self.assertRaises(error) as raised:
                             bootstrap._wheel()
+                        self.assertEqual(str(raised.exception), message)
 
     def test_download_replaces_only_verified_bytes(self):
         import io

@@ -254,6 +254,32 @@ The same command fixture passes on the candidate, with exit 1, no output
 directory or stdout, and the expected error on stderr. The valid fixture
 still assembles all ten products with verified checksums. No release ran.
 
+The release collector and locked wheel bootstrap passed a case-sensitive
+[Linux mutation trial](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44317939755)
+at `037466b1bbdc95e8f827bfd6130800af6b56f24d`. This trial uses the same
+production files as `6f074f2636436933ed000916ed9fe33ccd7e0e8e`, with exact
+invalid-lock diagnostics in the bootstrap tests. Mutmut 3.8.1 and pytest
+9.2.0 classified all 155 collector identities and all 75 bootstrap
+identities with one worker. The collector caught 152 and the bootstrap
+caught all 75. The bootstrap had caught 40 of the same 75 in the prior
+baseline. Exact diagnostics catch the three message-only survivors.
+Linux distinguishes the two case variants of the lock and staging names.
+
+Collector IDs `x_assemble__mutmut_36` and `x_assemble__mutmut_38` are
+equivalent for `Path.mkdir`: `None` is falsey and an omitted `exist_ok`
+defaults to false. `x_check_manifest__mutmut_7` is equivalent on the
+workflow's supported filename inputs. The pinned numeric version occurs
+once in each declared stem between its profile and target, so
+`partition` and `rpartition` split there. The unsupported manual version
+strings are outside that workflow's naming contract.
+
+Reproduce using the
+[sealed trial workflow](https://github.com/laputa-systems/ffmpeg-build/blob/037466b1bbdc95e8f827bfd6130800af6b56f24d/.github/workflows/deslop-collector-trial.yml).
+The collector production file is copied byte for byte to
+`workflow/scripts/` in the archive, so mutmut can assign importable
+module names. Only the disposable test copy changes its import to match.
+No native build or release ran.
+
 ## Tickets
 
 
