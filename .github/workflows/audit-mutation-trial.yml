@@ -1,4 +1,4 @@
-name: native runtime binary audit mutation census
+name: native bootstrap mutation census
 
 on: pull_request
 
@@ -32,29 +32,29 @@ jobs:
         with:
           version: 0.13.7
       - run: uv python install 3.15.2
-      - name: Measure and account for Linux ELF and macOS Mach-O audit identities
+      - name: Measure and account for bootstrap cache and digest identities
         run: |
           proof="$PWD/.work/tmp/audit-proof"
           mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
           touch "$proof/.work/cache/sources/.keep"
           export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
           git archive HEAD | tar -x -C "$proof"
+          (cd "$proof"; uv run --frozen --python 3.15.2 python -c 'import bootstrap')
           cat >> "$proof/pyproject.toml" <<'TOML'
 
           [tool.mutmut]
-          source_paths = ["build.py"]
-          also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles",
-                       ".work/cache/sources", ".github/scripts", "patches", "scripts", "Makefile"]
-          pytest_add_cli_args_test_selection = ["tests/test_build.py"]
+          source_paths = ["bootstrap.py"]
+          also_copy = ["tests", "sources.lock.json", ".work/cache/sources"]
+          pytest_add_cli_args_test_selection = ["tests/test_bootstrap.py"]
           use_setproctitle = false
           TOML
           uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
             cd "$1"
             python -m mutmut run --max-children 1 \
-              "build.x_audit_runtime_elf__mutmut_*" "build.x_audit_runtime_macho__mutmut_*"
+              "bootstrap.x__wheel__mutmut_*" "bootstrap.x__digest__mutmut_*"
           ' audit-proof "$proof"
           for part in meta spans; do
-            gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n' | fold -w 3000 | awk -v part="$part" '{print part, $0}'
+            gzip -c "$proof/mutants/bootstrap.py.$part" | base64 | tr -d '\n' | fold -w 3000 | awk -v part="$part" '{print part, $0}'
           done
           uv run --frozen --python 3.15.2 python - "$proof" "$PWD/.work/buildlib/scripts" <<'PY'
           import sys
@@ -65,16 +65,19 @@ jobs:
           from mutants_gate import load_json, read_results
 
           directory = Path(sys.argv[1]) / "mutants"
-          meta = directory / "build.py.meta"
-          spans = directory / "build.py.spans"
+          meta = directory / "bootstrap.py.meta"
+          spans = directory / "bootstrap.py.spans"
           names = load_json(meta)["exit_code_by_key"]
-          functions = ("audit_runtime_elf", "audit_runtime_macho")
-          prefixes = tuple(f"build.x_{function}__mutmut_" for function in functions)
+          functions = ("_wheel", "_digest")
+          prefixes = tuple(f"bootstrap.x_{function}__mutmut_" for function in functions)
           pending = {name for name in names if not name.startswith(prefixes)}
-          results = read_results(meta, spans, "build.", pending)
-          for prefix, expected in zip(prefixes, (162, 131), strict=True):
-              members = {name: outcome for name, outcome in results.items() if name.startswith(prefix)}
-              assert len(members) == expected, len(members)
+          results = read_results(meta, spans, "bootstrap.", pending)
+          results_by_function = {
+              prefix: {name: outcome for name, outcome in results.items() if name.startswith(prefix)}
+              for prefix in prefixes
+          }
+          assert sum(map(len, results_by_function.values())) == 75
+          for prefix, members in results_by_function.items():
               print(prefix, dict(sorted(Counter(members.values()).items())))
               for name, outcome in sorted(members.items()):
                   if outcome != "killed":
