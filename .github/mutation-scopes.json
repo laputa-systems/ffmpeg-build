@@ -1,6 +1,6 @@
 {
   "artifacts": {
-    "source_sha256": "6d18c8726fd179c5ba9ce24d268a0d97e3422c90d152f14096b17dfdf5a68706",
+    "source_sha256": "835358a520c8e6a39d60719d94161aea99087c131f0f38720fc2252ef7717743",
     "survivors": {
       "ubuntu-26.04": [
         "build.x_package__mutmut_89=73a6a64dafbbe8d4b9f3e01557c363d12f69ed3bb2471a86de5124e750b50cb8",
@@ -19,7 +19,7 @@
         "build.x_qualify__mutmut_179=78815c9908f4656abceeb9044fd7969bbfeff1b24d5c592759cd476298f9f182"
       ]
     },
-    "total": 621
+    "total": 625
   },
   "audit": {
     "source_sha256": "8ab238608e99fa604a8dcd413fe54fecc140f82831065755039806036915e89e",
