@@ -828,23 +828,72 @@ class StageTests(unittest.TestCase):
             version_exits.clear()
 
             (stage / "include" / "zlib.h").write_bytes(b"bundled header")
+            (stage / "include" / "device.h").symlink_to("libavdevice/avdevice.h")
+            (stage / "include" / "libavcodec" / "avcodec.h").unlink()
+            (stage / "lib" / "unlisted.txt").write_bytes(b"unexpected library payload")
+            (pkgconfig / "libavfilter.pc").unlink()
+            (pkgconfig / "libavutil.pc").write_text("prefix=/fixture/nonrelocatable\n", encoding="utf-8")
+            (binaries / "ffprobe").unlink()
             util = stage / entries["libavutil"]["file"]
+            identity = identities[util]
+            identities[util] = "libunexpected"
             util.write_bytes(b"changed runtime payload")
-            command_outputs["-protocols"] = "Input:\n  file\n  http\n"
-            command_outputs["-encoders"] = ""
+            command_outputs.update({
+                "-buildconf": "--enable-network",
+                "-protocols": "Input:\n  file\n  http\n",
+                "-encoders": "",
+                "-hwaccels": "Hardware acceleration methods:\nunsupported\n",
+            })
             audit = build.Audit()
             with redirect_stdout(io.StringIO()) as stdout:
-                build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
+                build.audit_runtime(
+                    audit.case, config, stage, "9.0.2",
+                    {"encoders": ["aac"]}, {"protocols": ["file", "http"]}, {"libraries": entries},
+                )
                 self.assertEqual(audit.finish(), 1, stdout.getvalue())
             self.assertEqual(
                 [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
                 [
+                    "programs are ffmpeg and ffprobe",
+                    "FFmpeg headers present",
                     "no dav1d or zlib headers",
+                    "symlinks are relative, inside lib/, and resolve",
+                    "lib/ holds exactly the seven FFmpeg libraries and their links",
+                    "pkg-config files are the seven libraries",
+                    "libavutil.pc relocatable and shared-only",
+                    f"libavutil {key} is {identity}",
                     "manifest libraries match the stage",
+                    "ffprobe present",
+                    "ffmpeg -buildconf has --disable-network",
                     "ffmpeg -protocols lists exactly the profile protocols",
                     "ffmpeg -encoders lists exactly the profile encoders",
+                    f"ffmpeg -hwaccels is ['{hwaccel}']",
                 ],
             )
+
+    def test_runtime_audit_reports_missing_stage_files_without_invoking_tools(self):
+        config = {"platform": "linux", "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "output") as inspect,
+            mock.patch.object(build.subprocess, "run") as program,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            audit = build.Audit()
+            build.audit_runtime(audit.case, config, self.stage, "9.0.2", {}, {}, {"libraries": {}})
+            self.assertEqual(audit.finish(), 1, stdout.getvalue())
+        inspect.assert_not_called()
+        program.assert_not_called()
+        self.assertEqual(
+            [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+            [
+                "programs are ffmpeg and ffprobe",
+                "FFmpeg headers present",
+                "lib/ holds exactly the seven FFmpeg libraries and their links",
+                "pkg-config files are the seven libraries",
+                "ffmpeg present",
+                "ffprobe present",
+            ],
+        )
 
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
