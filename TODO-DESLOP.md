@@ -801,6 +801,24 @@ Use the controller archive recipe with `tests/test_build.py` and
 `foreign_macho_loads`, and `pc_problems`. All 141 ordinary tests and
 both linters passed.
 
+The native toolchain and build-fingerprint trial at `068e30ae` used the
+ordinary controller archive, mutmut 3.8.1 and pytest 9.2.0 on macOS ARM64.
+Across `require_native_host`, `musl_version`, `platform_toolchain`, and
+`build_fingerprint`, the previous suite caught 20 of 186, with 30
+survivors and 136 with no selected test. The new suite catches 179 of
+the same 186. Host variant 2 uses an empty string as the unsupported
+host marker. Musl variants 5 and 9 retain the falsey subprocess check
+setting. Musl variant 11 and build-fingerprint variants 4, 7 and 10
+change only the path case on the macOS fixture volume.
+
+The tests run a local `ldd` fixture that supplies stdout and stderr
+independently and returns the real musl version-command status.
+Compiler and SDK discovery uses the existing output adapter in the
+controller fixture. The fingerprint test computes the reference hash
+directly and varies each input file. Run the usual `tests/test_build.py`
+mutation selection with the four function names above. The focused
+tests, ordinary suite and linters passed.
+
 ## Tickets
 
 

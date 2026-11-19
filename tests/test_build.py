@@ -198,6 +198,145 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(build.ABSOLUTE_BUILD_TREE.search(b"./.work/build/a.c"))
 
 
+class ToolchainInputTests(unittest.TestCase):
+    def setUp(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(dir=scratch)))
+
+    def test_native_target_requires_the_selected_platform(self):
+        target = "x86_64-unknown-linux-musl"
+        with mock.patch.object(build.targets, "native_target", return_value=build.targets.target_for_triple(target)) as native:
+            self.assertIsNone(build.require_native_host({"platform": "linux", "arch": "x86_64"}, target))
+            native.assert_called_once_with()
+        with (
+            mock.patch.object(build.targets, "native_target", side_effect=build.targets.UnsupportedTargetError),
+            mock.patch.object(build.platform, "system", return_value="FreeBSD"),
+            mock.patch.object(build.platform, "machine", return_value="amd64"),
+        ):
+            for config, triple, expected in (
+                ({"platform": "linux", "arch": "x86_64"}, target, "; use scripts/linux-build.sh"),
+                ({"platform": "macos", "arch": "aarch64"}, "aarch64-apple-darwin", ""),
+            ):
+                with self.subTest(target=triple), self.assertRaises(SystemExit) as error:
+                    build.require_native_host(config, triple)
+                self.assertEqual(
+                    str(error.exception),
+                    f"error: target {triple} builds natively on {config['platform']} {config['arch']}; "
+                    f"this host is FreeBSD amd64{expected}",
+                )
+
+    def test_musl_version_reads_ldd_stderr_or_stdout_and_rejects_bad_output(self):
+        ldd = self.root / "ldd"
+        ldd.write_text(
+            "#!/bin/sh\n"
+            "test \"$#\" -eq 1 && test \"$1\" = --version || exit 127\n"
+            "case \"$LDD_FIXTURE\" in\n"
+            "  musl) printf 'musl libc (x86_64)\\nVersion 1.2.6\\n' >&2; exit 1 ;;\n"
+            "  plain) printf 'musl libc (aarch64)\\nVersion 1.2.60\\n' ;;\n"
+            "  missing) printf 'musl libc (aarch64)\\nVersion unknown\\n' >&2 ;;\n"
+            "  *) printf 'GNU libc\\nVersion 2.41\\n' ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        ldd.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": str(self.root)}):
+            for mode, version in (("musl", "1.2.6"), ("plain", "1.2.60")):
+                with self.subTest(mode=mode), mock.patch.dict(os.environ, {"LDD_FIXTURE": mode}):
+                    self.assertEqual(build.musl_version(), version)
+            for mode, message in (
+                ("missing", "cannot read the musl version from ldd"),
+                ("glibc", "Linux targets require a musl host; ldd does not report musl"),
+            ):
+                with (
+                    self.subTest(mode=mode),
+                    mock.patch.dict(os.environ, {"LDD_FIXTURE": mode}),
+                    self.assertRaises(SystemExit) as error,
+                ):
+                    build.musl_version()
+                self.assertEqual(str(error.exception), f"error: {message}")
+
+    def test_records_macos_compiler_and_sdk_identity(self):
+        replies = {
+            ("clang-fixture", "--version"): "Apple Clang fixture\nTarget: arm64",
+            ("xcrun", "--sdk", "macosx", "--show-sdk-path"): "/fixture/Xcode/MacOSX.sdk",
+            ("xcrun", "--sdk", "macosx", "--show-sdk-version"): "27.1",
+        }
+        with (
+            mock.patch.object(build.platform, "platform", return_value="macOS-fixture"),
+            mock.patch.object(build, "output", side_effect=lambda args: replies[tuple(args)]) as output,
+        ):
+            result = build.platform_toolchain({"platform": "macos", "cc": "clang-fixture", "deployment_target": "16.0"})
+        self.assertEqual(result, {
+            "host": "macOS-fixture", "cpu_baseline": "", "deployment_target": "16.0",
+            "cc": "Apple Clang fixture", "sdk": "/fixture/Xcode/MacOSX.sdk",
+            "sysroot": "/fixture/Xcode/MacOSX.sdk", "sdk_version": "27.1",
+        })
+        self.assertEqual(output.call_args_list, [mock.call(list(command)) for command in replies])
+
+    def test_records_alpine_compiler_sysroot_release_and_musl(self):
+        release_file = self.root / "alpine-release"
+        for present in (False, True):
+            with self.subTest(release_file=present):
+                if present:
+                    release_file.write_text(" 3.24.2\n", encoding="utf-8")
+                expected_sysroot = "/cross/musl" if present else ""
+                replies = {("cc", "--version"): "GCC fixture\nTarget: x86-64", ("cc", "-print-sysroot"): expected_sysroot}
+                with (
+                    mock.patch.object(build.platform, "platform", return_value="Linux-fixture"),
+                    mock.patch.object(build, "pathlib") as path_module,
+                    mock.patch.object(build, "output", side_effect=lambda args, replies=replies: replies[tuple(args)]) as output,
+                    mock.patch.object(build, "musl_version", return_value="1.2.6") as musl,
+                ):
+                    path_module.Path.return_value = release_file
+                    result = build.platform_toolchain({"platform": "linux", "cpu_baseline": "x86-64-v2"})
+                path_module.Path.assert_called_once_with("/etc/alpine-release")
+                self.assertEqual(result, {
+                    "host": "Linux-fixture", "cpu_baseline": "x86-64-v2", "deployment_target": "",
+                    "cc": "GCC fixture", "sdk": "alpine", "sysroot": expected_sysroot or "/",
+                    "sdk_version": "3.24.2" if present else "", "libc": "musl 1.2.6",
+                })
+                musl.assert_called_once_with()
+                self.assertEqual(output.call_args_list, [mock.call(list(command)) for command in replies])
+
+    def test_fingerprint_binds_the_reproducibility_inputs(self):
+        patches = self.root / "patches"
+        patches.mkdir()
+        profile = self.root / "profile.json"
+        sources = {
+            self.root / "build.py": b"builder",
+            self.root / "sources.lock.json": b"locked files",
+            patches / "ffmpeg-owned-help.patch": b"patch",
+            profile: b"profile",
+        }
+        for path, contents in sources.items():
+            path.write_bytes(contents)
+        target = "x86_64-unknown-linux-musl"
+        arguments = ["--arch=x86_64", "--disable-network"]
+        toolchain = {"libc": "musl 1.2.6", "cc": "GCC fixture"}
+        inputs = {
+            "target": target, "profile": "tools", "configure_args": arguments, "toolchain": toolchain,
+            "python": "fixture interpreter", "machine": "x86_64", "system": "Linux",
+        }
+        metadata = json.dumps(inputs, sort_keys=True).encode("utf-8")
+        expected = hashlib.sha256(b"".join(sources.values()) + metadata).hexdigest()
+        with (
+            mock.patch.object(build, "ROOT", self.root),
+            mock.patch.object(build.sys, "version", "fixture interpreter"),
+            mock.patch.object(build.platform, "machine", return_value="x86_64"),
+            mock.patch.object(build.platform, "system", return_value="Linux"),
+        ):
+            self.assertEqual(build.build_fingerprint(profile, target, "tools", arguments, toolchain), expected)
+            self.assertEqual(
+                build.build_fingerprint(profile, target, "tools", arguments, dict(reversed(list(toolchain.items())))), expected,
+            )
+            for path, contents in sources.items():
+                with self.subTest(path=path):
+                    path.write_bytes(contents + b"-changed")
+                    self.assertNotEqual(build.build_fingerprint(profile, target, "tools", arguments, toolchain), expected)
+                    path.write_bytes(contents)
+
+
 class SourceAcquisitionTests(unittest.TestCase):
     def test_fetches_locked_local_archives_in_order_and_extracts_declared_root(self):
         build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
