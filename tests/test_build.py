@@ -198,6 +198,275 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(build.ABSOLUTE_BUILD_TREE.search(b"./.work/build/a.c"))
 
 
+class ToolchainInputTests(unittest.TestCase):
+    def setUp(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(dir=scratch)))
+
+    def test_native_target_requires_the_selected_platform(self):
+        target = "x86_64-unknown-linux-musl"
+        with mock.patch.object(build.targets, "native_target", return_value=build.targets.target_for_triple(target)) as native:
+            self.assertIsNone(build.require_native_host({"platform": "linux", "arch": "x86_64"}, target))
+            native.assert_called_once_with()
+        with (
+            mock.patch.object(build.targets, "native_target", side_effect=build.targets.UnsupportedTargetError),
+            mock.patch.object(build.platform, "system", return_value="FreeBSD"),
+            mock.patch.object(build.platform, "machine", return_value="amd64"),
+        ):
+            for config, triple, expected in (
+                ({"platform": "linux", "arch": "x86_64"}, target, "; use scripts/linux-build.sh"),
+                ({"platform": "macos", "arch": "aarch64"}, "aarch64-apple-darwin", ""),
+            ):
+                with self.subTest(target=triple), self.assertRaises(SystemExit) as error:
+                    build.require_native_host(config, triple)
+                self.assertEqual(
+                    str(error.exception),
+                    f"error: target {triple} builds natively on {config['platform']} {config['arch']}; "
+                    f"this host is FreeBSD amd64{expected}",
+                )
+
+    def test_musl_version_reads_ldd_stderr_or_stdout_and_rejects_bad_output(self):
+        ldd = self.root / "ldd"
+        ldd.write_text(
+            "#!/bin/sh\n"
+            "test \"$#\" -eq 1 && test \"$1\" = --version || exit 127\n"
+            "case \"$LDD_FIXTURE\" in\n"
+            "  musl) printf 'musl libc (x86_64)\\nVersion 1.2.6\\n' >&2; exit 1 ;;\n"
+            "  plain) printf 'musl libc (aarch64)\\nVersion 1.2.60\\n' ;;\n"
+            "  missing) printf 'musl libc (aarch64)\\nVersion unknown\\n' >&2 ;;\n"
+            "  *) printf 'GNU libc\\nVersion 2.41\\n' ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        ldd.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": str(self.root)}):
+            for mode, version in (("musl", "1.2.6"), ("plain", "1.2.60")):
+                with self.subTest(mode=mode), mock.patch.dict(os.environ, {"LDD_FIXTURE": mode}):
+                    self.assertEqual(build.musl_version(), version)
+            for mode, message in (
+                ("missing", "cannot read the musl version from ldd"),
+                ("glibc", "Linux targets require a musl host; ldd does not report musl"),
+            ):
+                with (
+                    self.subTest(mode=mode),
+                    mock.patch.dict(os.environ, {"LDD_FIXTURE": mode}),
+                    self.assertRaises(SystemExit) as error,
+                ):
+                    build.musl_version()
+                self.assertEqual(str(error.exception), f"error: {message}")
+
+    def test_records_macos_compiler_and_sdk_identity(self):
+        replies = {
+            ("clang-fixture", "--version"): "Apple Clang fixture\nTarget: arm64",
+            ("xcrun", "--sdk", "macosx", "--show-sdk-path"): "/fixture/Xcode/MacOSX.sdk",
+            ("xcrun", "--sdk", "macosx", "--show-sdk-version"): "27.1",
+        }
+        with (
+            mock.patch.object(build.platform, "platform", return_value="macOS-fixture"),
+            mock.patch.object(build, "output", side_effect=lambda args: replies[tuple(args)]) as output,
+        ):
+            result = build.platform_toolchain({"platform": "macos", "cc": "clang-fixture", "deployment_target": "16.0"})
+        self.assertEqual(result, {
+            "host": "macOS-fixture", "cpu_baseline": "", "deployment_target": "16.0",
+            "cc": "Apple Clang fixture", "sdk": "/fixture/Xcode/MacOSX.sdk",
+            "sysroot": "/fixture/Xcode/MacOSX.sdk", "sdk_version": "27.1",
+        })
+        self.assertEqual(output.call_args_list, [mock.call(list(command)) for command in replies])
+
+    def test_records_alpine_compiler_sysroot_release_and_musl(self):
+        release_file = self.root / "alpine-release"
+        for present in (False, True):
+            with self.subTest(release_file=present):
+                if present:
+                    release_file.write_text(" 3.24.2\n", encoding="utf-8")
+                expected_sysroot = "/cross/musl" if present else ""
+                replies = {("cc", "--version"): "GCC fixture\nTarget: x86-64", ("cc", "-print-sysroot"): expected_sysroot}
+                with (
+                    mock.patch.object(build.platform, "platform", return_value="Linux-fixture"),
+                    mock.patch.object(build, "pathlib") as path_module,
+                    mock.patch.object(build, "output", side_effect=lambda args, replies=replies: replies[tuple(args)]) as output,
+                    mock.patch.object(build, "musl_version", return_value="1.2.6") as musl,
+                ):
+                    path_module.Path.return_value = release_file
+                    result = build.platform_toolchain({"platform": "linux", "cpu_baseline": "x86-64-v2"})
+                path_module.Path.assert_called_once_with("/etc/alpine-release")
+                self.assertEqual(result, {
+                    "host": "Linux-fixture", "cpu_baseline": "x86-64-v2", "deployment_target": "",
+                    "cc": "GCC fixture", "sdk": "alpine", "sysroot": expected_sysroot or "/",
+                    "sdk_version": "3.24.2" if present else "", "libc": "musl 1.2.6",
+                })
+                musl.assert_called_once_with()
+                self.assertEqual(output.call_args_list, [mock.call(list(command)) for command in replies])
+
+    def test_fingerprint_binds_the_reproducibility_inputs(self):
+        patches = self.root / "patches"
+        patches.mkdir()
+        profile = self.root / "profile.json"
+        sources = {
+            self.root / "build.py": b"builder",
+            self.root / "sources.lock.json": b"locked files",
+            patches / "ffmpeg-owned-help.patch": b"patch",
+            profile: b"profile",
+        }
+        for path, contents in sources.items():
+            path.write_bytes(contents)
+        target = "x86_64-unknown-linux-musl"
+        arguments = ["--arch=x86_64", "--disable-network"]
+        toolchain = {"libc": "musl 1.2.6", "cc": "GCC fixture"}
+        inputs = {
+            "target": target, "profile": "tools", "configure_args": arguments, "toolchain": toolchain,
+            "python": "fixture interpreter", "machine": "x86_64", "system": "Linux",
+        }
+        metadata = json.dumps(inputs, sort_keys=True).encode("utf-8")
+        expected = hashlib.sha256(b"".join(sources.values()) + metadata).hexdigest()
+        with (
+            mock.patch.object(build, "ROOT", self.root),
+            mock.patch.object(build.sys, "version", "fixture interpreter"),
+            mock.patch.object(build.platform, "machine", return_value="x86_64"),
+            mock.patch.object(build.platform, "system", return_value="Linux"),
+        ):
+            self.assertEqual(build.build_fingerprint(profile, target, "tools", arguments, toolchain), expected)
+            self.assertEqual(
+                build.build_fingerprint(profile, target, "tools", arguments, dict(reversed(list(toolchain.items())))), expected,
+            )
+            for path, contents in sources.items():
+                with self.subTest(path=path):
+                    path.write_bytes(contents + b"-changed")
+                    self.assertNotEqual(build.build_fingerprint(profile, target, "tools", arguments, toolchain), expected)
+                    path.write_bytes(contents)
+
+
+class ConfigureContractTests(unittest.TestCase):
+    def test_linux_tools_configure_handoff_uses_relative_dependency_paths(self):
+        profile = {
+            "profile": "tools", "artifact": "tools", "license": "gpl",
+            "components": {"decoders": ["mov_text"], "protocols": ["file"], "indevs": ["lavfi"]},
+            "targets": {"aarch64-unknown-linux-musl": {
+                "platform": "linux", "arch": "aarch64", "cpu_baseline": "armv8-a",
+                "cc": "compiler-fixture", "external_libraries": ["x264", "dav1d"],
+                "configure_flags": ["--disable-debug"],
+            }},
+        }
+        work = pathlib.Path("/fixture/job")
+        arguments = build.configure_args_for(profile, "aarch64-unknown-linux-musl", work, work / "deps", {})
+        self.assertEqual(arguments, [
+            "--prefix=/opt/ffmpeg-build", "--disable-shared", "--enable-static",
+            "--disable-programs", "--enable-ffmpeg", "--enable-ffprobe", "--pkg-config-flags=--static",
+            "--disable-doc", "--disable-network", "--enable-avdevice", "--enable-gpl",
+            "--disable-autodetect", "--disable-everything", "--enable-libx264", "--enable-libdav1d",
+            "--enable-zlib", "--enable-pic", "--cc=compiler-fixture", "--arch=aarch64",
+            "--extra-cflags=-O2 -fPIC -march=armv8-a -I../deps/include", "--extra-ldflags=-L../deps/lib",
+            "--extra-ldexeflags=-static-pie -Wl,-z,stack-size=2097152", "--disable-debug",
+            "--enable-decoder=movtext", "--enable-protocol=file", "--enable-indev=lavfi",
+        ])
+
+    def test_macos_sdk_and_runtime_use_the_selected_sysroot_and_deployment_target(self):
+        triple = "aarch64-apple-darwin"
+        config = {"platform": "macos", "arch": "aarch64", "deployment_target": "16.0"}
+        work = pathlib.Path("/fixture/job")
+        dependencies = pathlib.Path("/fixture/prefix")
+        toolchain = {"sysroot": "/sdk"}
+        for artifact, linkage, extra in (
+            ("sdk", ["--disable-shared", "--enable-static"], []),
+            ("runtime", ["--enable-shared", "--disable-static"], ["--enable-ffmpeg", "--enable-ffprobe"]),
+        ):
+            profile = {
+                "profile": artifact, "artifact": artifact, "license": "lgpl",
+                "components": {"protocols": ["file"]}, "targets": {triple: config},
+            }
+            if artifact == "runtime":
+                loader = [
+                    "--install-name-dir=@rpath", "--extra-ldexeflags=-Wl,-rpath,@loader_path/../lib",
+                    "--extra-ldsoflags=-Wl,-rpath,@loader_path",
+                ]
+            else:
+                loader = []
+            with self.subTest(artifact=artifact):
+                self.assertEqual(build.configure_args_for(profile, triple, work, dependencies, toolchain), [
+                    "--prefix=/opt/ffmpeg-build", *linkage, "--disable-programs", *extra,
+                    "--disable-doc", "--disable-network", "--disable-avdevice", "--disable-autodetect",
+                    "--disable-everything", "--enable-zlib", "--enable-pic", "--cc=cc", "--sysroot=/sdk",
+                    "--extra-cflags=-O2 -fPIC -mmacosx-version-min=16.0 -I../../prefix/include",
+                    "--extra-ldflags=-mmacosx-version-min=16.0 -L../../prefix/lib", *loader, "--enable-protocol=file",
+                ])
+        del config["deployment_target"]
+        with self.assertRaises(SystemExit) as error:
+            build.configure_args_for(profile, triple, work, dependencies, toolchain)
+        self.assertEqual(str(error.exception), f"error: macOS target {triple} lacks deployment_target")
+
+    def test_configure_metadata_reads_first_complete_configuration_value(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+            work = pathlib.Path(directory)
+            path = work / "ffbuild" / "config.mak"
+            path.parent.mkdir()
+            path.mkdir()
+            with self.assertRaises(SystemExit) as error:
+                build.parse_config_mak(work)
+            self.assertEqual(str(error.exception), f"error: missing {path}")
+            path.rmdir()
+            config = (
+                "NOT_FFMPEG_CONFIGURATION=decoy\n"
+                "FFMPEG_CONFIGURATION=--prefix=/fixture --enable-libdav1d\n"
+                "FFMPEG_CONFIGURATION=second-value\n"
+            )
+            path.write_text(config, encoding="utf-8")
+            self.assertEqual(build.parse_config_mak(work), config)
+            self.assertEqual(build.parse_configuration(config), "--prefix=/fixture --enable-libdav1d")
+            self.assertEqual(build.parse_configuration("SOMETHING=else\n"), "")
+
+    def test_component_header_accepts_every_enabled_component_category(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+            work = pathlib.Path(directory)
+            path = work / "config_components.h"
+            with self.assertRaises(SystemExit) as error:
+                build.parse_components(work)
+            self.assertEqual(str(error.exception), f"error: missing {path}")
+            path.write_text(
+                "#define OTHER_OPTION 1\n#define CONFIG_Z_ALT_DECODER 1\n#define CONFIG_A_DECODER 1\n"
+                "#define CONFIG_Z_ALT_DECODER 1\n"
+                "#define CONFIG_MATROSKA_DEMUXER 1\n#define CONFIG_AV1_PARSER 1\n#define CONFIG_NULL_BSF 1\n"
+                "#define CONFIG_SCALE_FILTER 1\n#define CONFIG_AV1_VAAPI_HWACCEL 1\n#define CONFIG_FILE_PROTOCOL 1\n"
+                "#define CONFIG_PNG_ENCODER 1\n#define CONFIG_MP4_MUXER 1\n#define CONFIG_ALSA_DEVICE 1\n"
+                "#define CONFIG_LAVFI_INDEV 1\n#define CONFIG_SDL_OUTDEV 1\n#define CONFIG_LAME_ENCODER 0\n"
+                "#define CONFIG_HLS_PROTOCOL 1 /* comment */\n#define OTHER_OPTION 1\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(build.parse_components(work), {
+                "decoders": ["a", "z_alt"], "demuxers": ["matroska"], "parsers": ["av1"], "bsfs": ["null"],
+                "filters": ["scale"], "hwaccels": ["av1_vaapi"], "protocols": ["file"], "encoders": ["png"],
+                "muxers": ["mp4"], "devices": ["alsa"], "indevs": ["lavfi"], "outdevs": ["sdl"],
+            })
+
+    def test_external_libraries_exclude_features_components_and_disabled_flags(self):
+        config = (
+            "CONFIG_LIBX264=yes\nCONFIG_LIBOPUS=yes\nCONFIG_LIBX264=yes\nCONFIG_LIBLIBVPX=yes\n"
+            "CONFIG_LIBX264_HDR10=yes\nCONFIG_LIBAOM=no\nCONFIG_LIBPLACEHOLDER_=yes\n"
+            "CONFIG_LIBNOT_A_MATCH=yes # comment\nCONFIG_LIBlower=yes\nEXTRA_CONFIG_LIBOTHER=yes\n"
+        )
+        for kind in ("DECODER", "ENCODER", "PARSER", "BSF", "FILTER", "DEMUXER", "MUXER", "HWACCEL", "PROTOCOL"):
+            config += f"CONFIG_LIBOPUS_{kind}=yes\n"
+        config += "CONFIG_LIBDAV1D=yes\n"
+        self.assertEqual(build.parse_external_libraries(config), ["dav1d", "opus", "placeholder_", "vpx", "x264"])
+
+    def test_component_checks_report_each_incompatible_resolved_feature(self):
+        requested = {"decoders": ["mov_text", "av1"], "indevs": ["lavfi"], "protocols": ["file", "http"]}
+        resolved = {
+            "decoders": ["movtext"], "indevs": ["lavfi", "alsa"], "protocols": ["file", "http", "tcp"],
+            "encoders": ["png"], "muxers": ["mp4"], "devices": ["sndio"], "outdevs": ["sdl"],
+        }
+        self.assertEqual(build.component_problems(requested, resolved), [
+            "encoders enabled: ['png']", "muxers enabled: ['mp4']", "devices enabled: ['sndio']",
+            "outdevs enabled: ['sdl']", "input device enabled: alsa", "protocols outside profile: ['tcp']",
+            "network protocols enabled: ['http', 'tcp']", "missing decoders: ['av1']",
+        ])
+        self.assertEqual(build.component_problems({"decoders": ["mov_text"]}, {}), ["missing decoders: ['movtext']"])
+
+
 class SourceAcquisitionTests(unittest.TestCase):
     def test_fetches_locked_local_archives_in_order_and_extracts_declared_root(self):
         build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
