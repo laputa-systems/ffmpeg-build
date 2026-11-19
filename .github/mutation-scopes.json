@@ -488,6 +488,24 @@
     },
     "total": 293
   },
+  "runtime-capabilities": {
+    "source_sha256": "cc0be2062de1b2477387ae8a5ab325e681a62fc3720510ae13eedcec2efb52ef",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_ffmpeg_codec_names__mutmut_2=ceb43c3326d19bbd59221e72baa3cb3c82019aac780c0245cb5c53f8e06d0c59",
+        "build.x_ffmpeg_protocols__mutmut_2=cbe2af18f8aa3c81d8294dae19e317fd8b79d29f5abab920f059ef66b1acd327"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_ffmpeg_codec_names__mutmut_2=ceb43c3326d19bbd59221e72baa3cb3c82019aac780c0245cb5c53f8e06d0c59",
+        "build.x_ffmpeg_protocols__mutmut_2=cbe2af18f8aa3c81d8294dae19e317fd8b79d29f5abab920f059ef66b1acd327"
+      ],
+      "xcode-27": [
+        "build.x_ffmpeg_codec_names__mutmut_2=ceb43c3326d19bbd59221e72baa3cb3c82019aac780c0245cb5c53f8e06d0c59",
+        "build.x_ffmpeg_protocols__mutmut_2=cbe2af18f8aa3c81d8294dae19e317fd8b79d29f5abab920f059ef66b1acd327"
+      ]
+    },
+    "total": 158
+  },
   "runtime-inspection": {
     "source_sha256": "00ec3cdf736012a1abb31665d7bf9896647e4774a056fdf88398373ebfd1b7cb",
     "survivors": {
@@ -662,6 +680,15 @@
       ]
     },
     "total": 133
+  },
+  "stage-filesystem": {
+    "source_sha256": "6453e2e55637ba0491365be834fe310703f6588fe05a89fd3dbbdbb905aa7a30",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": []
+    },
+    "total": 150
   },
   "tools": {
     "source_sha256": "f48f6e95a039c4a1a4854169456bd717592922dcd9305d5f2a2c018065569e77",

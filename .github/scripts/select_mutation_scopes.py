@@ -23,6 +23,10 @@ SCOPES = {
     }),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
+    "runtime-capabilities": frozenset({
+        "bundled_symbol_exports", "exported_symbols", "ffmpeg_codec_names", "ffmpeg_hwaccel_types",
+        "ffmpeg_protocols", "foreign_elf_needed", "foreign_macho_loads", "pc_problems",
+    }),
     "runtime-inspection": frozenset({
         "elf_dynamic", "gnu_stack_size", "library_identity_name", "library_layout",
         "macho_load_commands", "versioned_library_pattern",
@@ -30,6 +34,10 @@ SCOPES = {
     "sdk": frozenset({"audit_sdk"}),
     "stage-admission": frozenset({"mismatched_source_pins", "parse_archive_name", "read_manifest", "stage_complete"}),
     "sources": frozenset({"extract_source", "fetch_profile_sources", "fetch_source"}),
+    "stage-filesystem": frozenset({
+        "identity_key", "library_identity", "library_link_names", "resolve_link", "runtime_libraries_manifest",
+        "sibling_name", "stage_links", "stage_tree", "symlink_problems",
+    }),
     "tools": frozenset({"audit_tools"}),
 }
 
