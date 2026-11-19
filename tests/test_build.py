@@ -373,6 +373,34 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(path.read_text(), contents)
                     self.assertFalse(dist.exists())
 
+    def test_audit_requires_native_host_build_tree_and_stage(self):
+        target = "aarch64-apple-darwin"
+        build_root = pathlib.Path(self.temp.name) / "build"
+        with (
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            mock.patch.object(build, "BUILD_ROOT", build_root),
+            mock.patch.object(build.targets, "native_target") as native_target,
+        ):
+            native_target.return_value = build.targets.target_for_triple("aarch64-unknown-linux-musl")
+            with self.assertRaisesRegex(SystemExit, f"target {target} builds natively"):
+                build.audit(target, "tools")
+
+            native_target.return_value = build.targets.target_for_triple(target)
+            stage, build_dir, _ = build.build_paths("tools", target)
+            with self.assertRaises(SystemExit) as error:
+                build.audit(target, "tools")
+            self.assertEqual(str(error.exception), f"error: missing build tree {build_dir}; run build first")
+
+            build_dir.mkdir(parents=True)
+            with self.assertRaises(SystemExit) as error:
+                build.audit(target, "tools")
+            self.assertEqual(str(error.exception), f"error: missing stage {stage}; run build first")
+
+            stage.mkdir(parents=True)
+            with self.assertRaises(SystemExit) as error:
+                build.audit(target, "tools")
+            self.assertEqual(str(error.exception), f"error: missing {build_dir / 'ffmpeg' / 'config_components.h'}")
+
     def test_audit_reports_inconsistent_build_tree_and_stage(self):
         target = "aarch64-unknown-linux-musl"
         profile, path = build.load_profile("tools")
