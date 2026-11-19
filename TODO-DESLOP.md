@@ -573,8 +573,17 @@ unchanged manifest parser catches all 82 after the new positive
 case. The four package survivors numbered 30, 32, 34 and 167 change
 manifest or lock-file path casing. The other two survivors,
 `package` 89 and `qualify` 179, supply a different fallback that
-still fails the same producer-commit check. Native packaging and
-qualification accounting remain open.
+still fails the same producer-commit check.
+
+The hosted artifact repeat at `21ce80e4dc1cf9aad253962507d09151909120e6`
+has the same 621 selected identities and source spans on all three
+hosts. Both Linux architectures catch all four path-case edits.
+Their 619 catches and the 615 on macOS account for the remainder
+with the two equivalent producer-commit fallbacks above. The
+five named artifact functions are fully dispositioned. Decode the
+chunked receipts as for the audit run. The complete spans SHA-256
+is `c66726a53408c86be0a5b58737867dea07c4f25e956baed313bf7bb33f10e116`.
+[Native artifact repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44438978427)
 
 ## Tickets
 
@@ -584,7 +593,7 @@ qualification accounting remain open.
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The complete audit entry point is dispositioned across three hosted architectures and OS combinations. Qualification survivors, wider native effects and a fail-closed whole-change mutation lane remain open.
+- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The audit entry point and five artifact functions are dispositioned across three hosts. Specialized native audit functions and a fail-closed whole-change mutation lane remain open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M
