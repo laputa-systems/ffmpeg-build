@@ -585,6 +585,22 @@ chunked receipts as for the audit run. The complete spans SHA-256
 is `c66726a53408c86be0a5b58737867dea07c4f25e956baed313bf7bb33f10e116`.
 [Native artifact repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44438978427)
 
+Running the full Python controller file at `4af3726` exercised all
+293 ELF and Mach-O runtime helper identities and caught them all.
+It caught 30 of 41 Linux configuration identities. The same
+selection reported no tests for the 288 SDK, 232 tools and 373
+runtime coordinator identities.
+
+The direct SDK fixtures now exercise the empty stage and a
+populated Linux stage with regular headers, archives and pkg-config
+metadata. The object tools return recorded fixture output at the
+invocation boundary. The audit selects object files, checks the
+ABI and package metadata, rejects incorrect staged contents and
+clears the object scratch. The SDK selection now exercises all
+288 identities and catches 214. Reuse the artifact archive recipe
+with `build.x_audit_sdk__mutmut_*`. The 74 survivors remain in
+DSLP-4. All 125 ordinary tests and both linters passed.
+
 ## Tickets
 
 
