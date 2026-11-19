@@ -464,6 +464,17 @@ identities using the preceding recipe and adding
 120 ordinary tests, Ruff and ty passed. The remaining 226 outcomes
 are under DSLP-4.
 
+The common audit fixture now changes the staged manifest fields
+independently of the matching tools build tree. It exercises resolved
+components, automatically enabled components, library sets, framework
+and dependency lists, configure records, license, and all required
+toolchain strings. Each case checks the failure for its own field.
+
+At `3bd56466f7208c0b385fa962fa700291418db000`, the same 696 audit
+identities moved from 470 to 502 catches. All previous catches held.
+Reproduce with the same three-test selector above. All 120 ordinary
+tests, Ruff and ty passed. DSLP-4 retains the 194 remaining outcomes.
+
 ## Tickets
 
 
