@@ -750,6 +750,100 @@ class StageTests(unittest.TestCase):
                         (target, "play-sdk", config, stage, build.load_sources()["ffmpeg"].version),
                     )
 
+    def test_audit_sdk_checks_files_abi_and_object_scratch(self):
+        target = "aarch64-unknown-linux-musl"
+        profile_name = "play-sdk"
+        profile, _ = build.load_profile(profile_name)
+        config = build.target_config(profile, target)
+        stage = self.stage
+        version = "9.0.2"
+        headers = [
+            "libavcodec/avcodec.h", "libavformat/avformat.h", "libavfilter/avfilter.h",
+            "libavutil/avutil.h", "libswresample/swresample.h", "libswscale/swscale.h", "dav1d/dav1d.h", "zlib.h",
+        ]
+        for header in headers:
+            path = stage / "include" / header
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture header")
+        version_file = stage / "include" / "libavutil" / "ffversion.h"
+        version_file.write_text(f'#define FFMPEG_VERSION "{version}"\n')
+        pc = stage / "lib" / "pkgconfig" / "libavutil.pc"
+        pc.parent.mkdir(parents=True)
+        pc.write_text("prefix=${pcfiledir}/../..\nLibs.private: -lva -lva-drm\n")
+        archives = [stage / "lib" / name for name in ("libavutil.a", "libdav1d.a", "libz.a")]
+        for archive in archives:
+            archive.write_bytes(b"fixture archive")
+
+        scratch = pathlib.Path(self.temp.name) / "objects"
+        previous = scratch / f"audit-{target}-{profile_name}-libavutil.a"
+        previous.mkdir(parents=True)
+        stale = previous / "obsolete.o"
+        stale.write_bytes(b"discarded")
+        object_kind = "ELF 64-bit LSB relocatable, ARM aarch64"
+
+        def run_fixture(arguments, **options):
+            if arguments[0] == "ar":
+                destination = options["cwd"]
+                self.assertEqual(destination.parent, scratch)
+                self.assertTrue(options["quiet"])
+                self.assertIn(pathlib.Path(arguments[2]), archives)
+                self.assertEqual(arguments[1], "x")
+                self.assertFalse(stale.exists())
+                nested = destination / "objects"
+                nested.mkdir()
+                for name in ("first.o", "second.obj", "note.txt"):
+                    (nested / name).write_bytes(b"fixture member")
+                return subprocess.CompletedProcess(arguments, 0, stdout="")
+            self.assertEqual(arguments[:2], ["file", "-b"])
+            self.assertEqual([pathlib.Path(path).name for path in arguments[2:]], ["first.o", "second.obj"])
+            self.assertTrue(options["capture"])
+            return subprocess.CompletedProcess(arguments, 0, stdout=f"{object_kind}\n{object_kind}\n")
+
+        with (
+            mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "run", side_effect=run_fixture),
+        ):
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 0, stdout.getvalue())
+            self.assertEqual(list(scratch.iterdir()), [])
+
+            version_file.write_text("#define OTHER_VERSION 1\n")
+            (stage / "bin").mkdir()
+            (stage / "bin" / "ffprobe").write_bytes(b"unexpected program")
+            (stage / "include" / "zlib.h").unlink()
+            archives[0].write_bytes(b"fixture GLIBC_ symbol version")
+            archives[2].unlink()
+            pc.write_text(f"prefix={stage}\nLibs.private: -lva\n")
+            object_kind = "LLVM bitcode"
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 1, stdout.getvalue())
+            problems = [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")]
+            self.assertEqual(problems, [
+                f"ffversion is {version}", "no programs installed", "headers present",
+                "bundled zlib archive", "libavutil.pc relocatable",
+                "archives contain object code, not bitcode", "no glibc symbol versions", "pkg-config declares libva-drm",
+            ])
+            self.assertEqual(list(scratch.iterdir()), [])
+
+    def test_audit_sdk_reports_an_empty_stage_without_running_tools(self):
+        target = "aarch64-apple-darwin"
+        config = {"platform": "macos", "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "run") as tool,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            check = build.Audit()
+            build.audit_sdk(check.case, target, "play-sdk", config, self.stage, "9.0.2")
+            self.assertEqual(check.finish(), 1, stdout.getvalue())
+        tool.assert_not_called()
+        self.assertEqual([
+            line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")
+        ], ["ffversion is 9.0.2", "headers present", "pkg-config files present", "static archives present"])
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]
