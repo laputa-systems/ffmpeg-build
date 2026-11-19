@@ -1267,6 +1267,7 @@ class StageTests(unittest.TestCase):
         dist = pathlib.Path(self.temp.name) / "dist"
         valid = json.loads(path.read_text())
         cases = (
+            ("{}", "manifest root must not be empty"),
             ("[]", "manifest root must be an object"),
             ("{", "Expecting property name"),
             (json.dumps(valid | {"sources": []}), "manifest sources must be an object"),
@@ -1380,6 +1381,7 @@ class StageTests(unittest.TestCase):
             wrong_commit = valid | {"producer": {"commit": "local"}}
             cases = (
                 (valid, good_config, good_components, []),
+                ({}, good_config, good_components, ["manifest readable"]),
                 (wrong_commit, good_config, good_components, ["manifest producer commit"]),
                 ({key: value for key, value in valid.items() if key != "producer"},
                  good_config, good_components, ["manifest producer commit"]),

@@ -952,6 +952,22 @@ collector. Including the two mutation gate scripts gives
 verifier runs in the native jobs and its controller-suite
 coverage is zero.
 
+**Cumulative review finding**
+
+An otherwise admissible tools build tree could pass `audit`
+with an empty staged manifest. The reader marked `{}` readable,
+then the audit skipped release identity, component and lock
+comparisons because the record was falsey. The sealed fixture at
+`eeafc0f2` returned zero with 24 passes and zero failures.
+
+The shared reader now rejects the empty object. The audit
+returns failure, and packaging leaves the manifest untouched
+and creates no destination. Valid stage records keep their
+existing handling. The macOS artifact scope caught 619 of 625
+with the same six reviewed survivors. Use the sealed controller
+tests `-k inconsistent_build_tree` and `-k manifest`. The
+whole ordinary suite and both linters passed.
+
 ## Tickets
 
 

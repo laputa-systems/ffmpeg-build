@@ -1213,6 +1213,8 @@ def parse_stage_manifest(path: pathlib.Path) -> dict:
     manifest: object = json.loads(path.read_text())
     if not isinstance(manifest, dict):
         raise TypeError("manifest root must be an object")
+    if not manifest:
+        raise TypeError("manifest root must not be empty")
     sources = manifest.get("sources", {})
     if not isinstance(sources, dict):
         raise TypeError("manifest sources must be an object")
