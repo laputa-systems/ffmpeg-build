@@ -1993,7 +1993,7 @@ def audit_runtime_elf(case, config, path, role, siblings):
     wanted_kind = "pie executable" if role == "program" else "shared object"
     case(
         f"{name} is an {ELF_MACHINE[config['arch']]} ELF {wanted_kind}",
-        "ELF" in kind and ELF_MACHINE[config["arch"]] in kind and wanted_kind in kind,
+        "ELF" in kind and wanted_kind in kind and ELF_MACHINE[config["arch"]] in kind,
         kind,
     )
     dynamic = elf_dynamic(output(["readelf", "-dW", str(path)]))
