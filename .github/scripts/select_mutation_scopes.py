@@ -14,6 +14,10 @@ SCOPES = {
         "archive_member_problems", "extracted_library_problems", "package", "parse_stage_manifest", "qualify",
     }),
     "audit": frozenset({"audit"}),
+    "audit-policy": frozenset({
+        "audit_linux_config", "build_prefix_leaks", "host_cpu_flag_problems", "license_problems",
+        "macos_linked_libraries", "object_kind_problem", "pc_declares",
+    }),
     "bootstrap": frozenset({"_digest", "_wheel"}),
     "build": frozenset({"build"}),
     "collector": frozenset({"archive_commit", "assemble", "check_manifest", "expected_assets", "expected_stems", "main"}),
@@ -24,6 +28,10 @@ SCOPES = {
     "dispatch": frozenset({"main"}),
     "profile-admission": frozenset({
         "load_profile", "load_sources", "profile_target_problems", "read_json", "target_config",
+    }),
+    "profile-resolution": frozenset({
+        "auto_selected", "development_link", "device_problems", "license_files",
+        "merged_components", "notice_paths", "requested_components",
     }),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),

@@ -210,6 +210,37 @@
     },
     "total": 696
   },
+  "audit-policy": {
+    "source_sha256": "47933075de755accee62b4074775b53e1a2ea3cd7bf8cecaabb8d0533cb039c1",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_audit_linux_config__mutmut_40=f963ee74eb5416a71c071013683fa04dd6fc8797dce51e23178e986a4102df96",
+        "build.x_macos_linked_libraries__mutmut_12=88d6a4b62bc5e24ee5c417f31c8405e6453550aa6e3d2fdacd8cb810c7bd9849",
+        "build.x_macos_linked_libraries__mutmut_13=d95b3c6578ec84bf86149aab3d29f27d82b60b9864af1f41910b6b161b498077",
+        "build.x_macos_linked_libraries__mutmut_15=26a25ad351ea526ea80943a75e15bb96f09795a16151800035f6f06ad94d330f",
+        "build.x_pc_declares__mutmut_13=ec7e2ac56f8918e6a9b5cbfc960c74fd0bbd0b3c1b35dc5c54316d66de8f8412",
+        "build.x_pc_declares__mutmut_16=1fa24f6137271c1cadd8edd3836251be7fc93ee1775adfaeecfe506607a4022b"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_audit_linux_config__mutmut_40=f963ee74eb5416a71c071013683fa04dd6fc8797dce51e23178e986a4102df96",
+        "build.x_macos_linked_libraries__mutmut_12=88d6a4b62bc5e24ee5c417f31c8405e6453550aa6e3d2fdacd8cb810c7bd9849",
+        "build.x_macos_linked_libraries__mutmut_13=d95b3c6578ec84bf86149aab3d29f27d82b60b9864af1f41910b6b161b498077",
+        "build.x_macos_linked_libraries__mutmut_15=26a25ad351ea526ea80943a75e15bb96f09795a16151800035f6f06ad94d330f",
+        "build.x_pc_declares__mutmut_13=ec7e2ac56f8918e6a9b5cbfc960c74fd0bbd0b3c1b35dc5c54316d66de8f8412",
+        "build.x_pc_declares__mutmut_16=1fa24f6137271c1cadd8edd3836251be7fc93ee1775adfaeecfe506607a4022b"
+      ],
+      "xcode-27": [
+        "build.x_audit_linux_config__mutmut_40=f963ee74eb5416a71c071013683fa04dd6fc8797dce51e23178e986a4102df96",
+        "build.x_audit_linux_config__mutmut_7=0948e90d5776534fede1b60f88a383d1dfb4c43881235a0f997b898a618aae17",
+        "build.x_macos_linked_libraries__mutmut_12=88d6a4b62bc5e24ee5c417f31c8405e6453550aa6e3d2fdacd8cb810c7bd9849",
+        "build.x_macos_linked_libraries__mutmut_13=d95b3c6578ec84bf86149aab3d29f27d82b60b9864af1f41910b6b161b498077",
+        "build.x_macos_linked_libraries__mutmut_15=26a25ad351ea526ea80943a75e15bb96f09795a16151800035f6f06ad94d330f",
+        "build.x_pc_declares__mutmut_13=ec7e2ac56f8918e6a9b5cbfc960c74fd0bbd0b3c1b35dc5c54316d66de8f8412",
+        "build.x_pc_declares__mutmut_16=1fa24f6137271c1cadd8edd3836251be7fc93ee1775adfaeecfe506607a4022b"
+      ]
+    },
+    "total": 203
+  },
   "bootstrap": {
     "source_sha256": "913acf711e707d6aca4e20a3e32ecaf173a4b9252210062916e556fc3cfc5a00",
     "survivors": {
@@ -363,6 +394,27 @@
       ]
     },
     "total": 119
+  },
+  "profile-resolution": {
+    "source_sha256": "7c93f522d2fb6a1e54a26cc17380ffe320e70d5a60326e86f335975a161736ac",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
+        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
+        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
+        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
+        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
+      ],
+      "xcode-27": [
+        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
+        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
+        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
+      ]
+    },
+    "total": 134
   },
   "runtime": {
     "source_sha256": "e8da96df97e5985fe9812ca7a8801f36816a071c530948c371141bfce08e0bb4",
