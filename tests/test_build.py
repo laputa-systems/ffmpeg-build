@@ -1011,6 +1011,7 @@ class StageTests(unittest.TestCase):
         stale = previous / "obsolete.o"
         stale.write_bytes(b"discarded")
         object_kind = "ELF 64-bit LSB relocatable, ARM aarch64"
+        builder_root = pathlib.Path(self.temp.name) / "separate-builder-root"
 
         def run_fixture(arguments, **options):
             if arguments[0] == "ar":
@@ -1028,10 +1029,12 @@ class StageTests(unittest.TestCase):
             self.assertEqual(arguments[:2], ["file", "-b"])
             self.assertEqual([pathlib.Path(path).name for path in arguments[2:]], ["first.o", "second.obj"])
             self.assertTrue(options["capture"])
+            self.assertTrue(options["quiet"])
             return subprocess.CompletedProcess(arguments, 0, stdout=f"{object_kind}\n{object_kind}\n")
 
         with (
             mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "ROOT", builder_root),
             mock.patch.object(build, "run", side_effect=run_fixture),
         ):
             with redirect_stdout(io.StringIO()) as stdout:
@@ -1040,6 +1043,20 @@ class StageTests(unittest.TestCase):
                 self.assertEqual(check.finish(), 0, stdout.getvalue())
             self.assertEqual(list(scratch.iterdir()), [])
 
+            for leaked in (stage, builder_root):
+                with self.subTest(leaked=leaked), redirect_stdout(io.StringIO()) as stdout:
+                    pc.write_text(
+                        f"prefix=${{pcfiledir}}/../..\nLibs.private: -lva -lva-drm\nCflags: -I{leaked}\n",
+                        encoding="utf-8",
+                    )
+                    check = build.Audit()
+                    build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                    self.assertEqual(check.finish(), 1, stdout.getvalue())
+                    self.assertEqual(
+                        [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                        ["FAIL audit: libavutil.pc relocatable: prefix='prefix=${pcfiledir}/../..' leaked=True"],
+                    )
+
             version_file.write_text("#define OTHER_VERSION 1\n")
             (stage / "bin").mkdir()
             (stage / "bin" / "ffprobe").write_bytes(b"unexpected program")
@@ -1047,6 +1064,10 @@ class StageTests(unittest.TestCase):
             archives[0].write_bytes(b"fixture GLIBC_ symbol version")
             archives[2].unlink()
             pc.write_text(f"prefix={stage}\nLibs.private: -lva\n")
+            (pc.parent / "unrelated.pc").write_text(
+                "prefix=${pcfiledir}/../..\nLibs.private: -lva-drm\n",
+                encoding="utf-8",
+            )
             object_kind = "LLVM bitcode"
             with redirect_stdout(io.StringIO()) as stdout:
                 check = build.Audit()
