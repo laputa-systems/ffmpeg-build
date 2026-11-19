@@ -1,5 +1,7 @@
+import hashlib
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -2197,7 +2199,7 @@ class SymlinkTests(unittest.TestCase):
         self.assertRejected({"lib/libz.so": "/usr/lib/libz.so.1"}, set(), "absolute")
 
     def test_rejects_escaping_targets(self):
-        for target in ("../share/x", "../../../etc/passwd", "..", "pkgconfig/libavcodec.pc", "./libavcodec.so.63"):
+        for target in ("../share/x", "..", ".", "pkgconfig/libavcodec.pc", "pkgconfig\\libavcodec.pc", "./libavcodec.so.63"):
             self.assertRejected({"lib/libavcodec.so": target}, {"share/x", "lib/pkgconfig/libavcodec.pc"}, "not a sibling in lib/")
 
     def test_rejects_dangling(self):
@@ -2212,11 +2214,134 @@ class SymlinkTests(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertTrue(all("cycle" in problem for problem in problems))
 
+    def test_reports_other_links_after_an_absolute_or_misplaced_link(self):
+        links = {"bin/item": "libcodec.so", "lib/absolute": "/usr/lib/libcodec.so", "lib/other": "missing"}
+        self.assertEqual(build.symlink_problems(links, set()), [
+            "bin/item: symlinks are allowed only directly in lib/",
+            "lib/absolute -> /usr/lib/libcodec.so: absolute target",
+            "lib/other -> missing: dangling",
+        ])
+
+    def test_rejects_a_chain_joining_a_cycle(self):
+        class Links(dict):
+            reads = 0
+
+            def __getitem__(self, key):
+                self.reads += 1
+                if self.reads > 20:
+                    raise AssertionError("symlink cycle did not terminate")
+                return super().__getitem__(key)
+
+        links = Links({"lib/a": "b", "lib/b": "c", "lib/c": "b"})
+        self.assertEqual(build.symlink_problems(links, set()), [
+            "lib/a -> b: symlink cycle", "lib/b -> c: symlink cycle", "lib/c -> b: symlink cycle",
+        ])
+
     def test_rejects_chain_that_leaves_lib(self):
         links = {"lib/libavcodec.so": "libavcodec.so.63", "lib/libavcodec.so.63": "../escape"}
         problems = build.symlink_problems(links, {"escape"})
         self.assertEqual(len(problems), 2)
         self.assertTrue(all("not a sibling in lib/" in problem for problem in problems))
+
+
+class StageFilesystemTests(unittest.TestCase):
+    def setUp(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.stage = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(dir=scratch)))
+        (self.stage / "lib").mkdir()
+
+    def test_stage_tree_preserves_links_without_walking_through_them(self):
+        library_dir = self.stage / "lib"
+        nested = library_dir / "objects"
+        nested.mkdir()
+        binary = nested / "object"
+        binary.write_bytes(b"object bytes")
+        (library_dir / "objects-link").symlink_to("objects", target_is_directory=True)
+        (library_dir / "object-link").symlink_to("objects/object")
+        files, links = build.stage_tree(self.stage)
+        self.assertEqual(files, {"lib/objects/object": binary})
+        self.assertEqual(links, {"lib/objects-link": "objects", "lib/object-link": "objects/object"})
+
+    def test_stage_tree_rejects_special_files(self):
+        os.mkfifo(self.stage / "pipe")
+        with self.assertRaisesRegex(SystemExit, r"^error: stage contains a special file: .*/pipe$"):
+            build.stage_tree(self.stage)
+
+    def test_stage_links_rejects_all_bad_links_in_sorted_order(self):
+        (self.stage / "lib/z").symlink_to("missing")
+        (self.stage / "lib/a").symlink_to("missing")
+        with self.assertRaises(SystemExit) as error:
+            build.stage_links(self.stage)
+        self.assertEqual(
+            str(error.exception),
+            "error: unsafe symlinks in stage: lib/a -> missing: dangling; lib/z -> missing: dangling",
+        )
+
+    def test_runtime_manifest_reads_each_library_identity_and_hash(self):
+        for platform_name in ("linux", "macos"):
+            with self.subTest(platform=platform_name):
+                library_dir = self.stage / "lib"
+                expected = {}
+                responses = {}
+                for index, library in enumerate(build.RUNTIME_LIBRARIES, start=60):
+                    if platform_name == "linux":
+                        file_name = f"{library}.so.{index}.1.100"
+                        major_link = f"{library}.so.{index}"
+                        developer_link = f"{library}.so"
+                        identity = major_link
+                        field = "soname"
+                        command = ("readelf", "-dW")
+                        binary_output = f" 0x1 (SONAME) Library soname: [{identity}]\n"
+                    else:
+                        file_name = f"{library}.{index}.1.100.dylib"
+                        major_link = f"{library}.{index}.dylib"
+                        developer_link = f"{library}.dylib"
+                        identity = f"@rpath/{major_link}"
+                        field = "install_name"
+                        command = ("otool", "-l")
+                        binary_output = f"Load command 0\n cmd LC_ID_DYLIB\n name {identity} (offset 24)\n"
+                    binary = library_dir / file_name
+                    payload = file_name.encode("ascii")
+                    binary.write_bytes(payload)
+                    (library_dir / major_link).symlink_to(file_name)
+                    (library_dir / developer_link).symlink_to(major_link)
+                    responses[(*command, str(binary))] = binary_output
+                    expected[library] = {
+                        "file": f"lib/{file_name}",
+                        "links": sorted([f"lib/{major_link}", f"lib/{developer_link}"]),
+                        field: identity,
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                    }
+
+                with mock.patch.object(build, "output", side_effect=lambda argv, responses=responses: responses[tuple(argv)]) as output:
+                    self.assertEqual(build.runtime_libraries_manifest(self.stage, platform_name), expected)
+                    output.assert_has_calls([mock.call(list(argv)) for argv in responses], any_order=True)
+                    self.assertEqual(output.call_count, len(responses))
+                for entry in library_dir.iterdir():
+                    entry.unlink()
+
+    def test_runtime_manifest_reports_invalid_links_and_incomplete_layout(self):
+        first = self.stage / "lib/a"
+        second = self.stage / "lib/z"
+        second.symlink_to("missing")
+        first.symlink_to("missing")
+        with self.assertRaises(SystemExit) as error:
+            build.runtime_libraries_manifest(self.stage, "linux")
+        self.assertEqual(
+            str(error.exception),
+            "error: unsafe symlinks in stage: lib/a -> missing: dangling; lib/z -> missing: dangling",
+        )
+        first.unlink()
+        second.unlink()
+        with self.assertRaises(SystemExit) as error:
+            build.runtime_libraries_manifest(self.stage, "linux")
+        self.assertEqual(
+            str(error.exception),
+            "error: runtime library layout: " + "; ".join(
+                f"{library}: expected one versioned library file, found []" for library in build.RUNTIME_LIBRARIES
+            ),
+        )
 
 
 class LibraryLayoutTests(unittest.TestCase):
@@ -2355,6 +2480,9 @@ class BinaryInspectionTests(unittest.TestCase):
         siblings = {"libavutil.so.61", "libavcodec.so.63"}
         allowed = ["libavutil.so.61", "libc.musl-x86_64.so.1", "libva.so.2", "libva-drm.so.2"]
         self.assertEqual(build.foreign_elf_needed(allowed, siblings, config), [])
+        self.assertEqual(
+            build.foreign_elf_needed(allowed, siblings, {"arch": "x86_64"}), ["libva-drm.so.2", "libva.so.2"],
+        )
         forbidden = ["libgcc_s.so.1", "libstdc++.so.6", "libz.so.1", "libdav1d.so.7", "libc.musl-aarch64.so.1", "libdrm.so.2"]
         self.assertEqual(build.foreign_elf_needed(allowed + forbidden, siblings, config), sorted(forbidden))
 
@@ -2368,6 +2496,10 @@ class BinaryInspectionTests(unittest.TestCase):
             "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
         ]
         self.assertEqual(build.foreign_macho_loads(loads, siblings, config), [])
+        self.assertEqual(
+            build.foreign_macho_loads(loads, siblings, {}),
+            ["/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox"],
+        )
         foreign = [
             "/usr/lib/libz.1.dylib",
             "/opt/homebrew/lib/libdav1d.7.dylib",
@@ -2384,6 +2516,8 @@ class BinaryInspectionTests(unittest.TestCase):
     def test_ffmpeg_listings(self):
         protocols = "Supported file protocols:\nInput:\n  fd\n  file\n  pipe\nOutput:\n  fd\n  file\n  pipe\n"
         self.assertEqual(build.ffmpeg_protocols(protocols), {"fd", "file", "pipe"})
+        self.assertEqual(build.ffmpeg_protocols("Supported file protocols:\n  unknown\nInput:\n  file\n"), {"file"})
+        self.assertEqual(build.ffmpeg_protocols("Output:\n  pipe\n"), {"pipe"})
         encoders = (
             "Encoders:\n V..... = Video\n A..... = Audio\n ------\n"
             " V....D png                  PNG (Portable Network Graphics) image\n"
@@ -2391,6 +2525,8 @@ class BinaryInspectionTests(unittest.TestCase):
         )
         self.assertEqual(build.ffmpeg_codec_names(encoders), {"png", "mov_text"})
         self.assertEqual(build.ffmpeg_hwaccel_types("Hardware acceleration methods:\nvaapi\n\n"), {"vaapi"})
+        self.assertEqual(build.ffmpeg_hwaccel_types("vaapi\n"), {"vaapi"})
+        self.assertEqual(build.ffmpeg_hwaccel_types("\n"), set())
 
 
 RUNTIME_PC = """prefix=${pcfiledir}/../..
@@ -2580,9 +2716,15 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_pc_problems(self):
         self.assertEqual(build.pc_problems(RUNTIME_PC), [])
-        self.assertEqual(len(build.pc_problems(RUNTIME_PC.replace("-lavcodec", "-lavcodec -ldav1d"))), 1)
-        self.assertEqual(len(build.pc_problems(RUNTIME_PC.replace("-I${includedir}", "-I/usr/include"))), 1)
-        self.assertEqual(len(build.pc_problems(RUNTIME_PC.replace("Libs.private:", "Libs.private: -lz"))), 1)
+        self.assertEqual(build.pc_problems("prefix=/sdk=a\nCflags: -I/usr/include:unused\n"), [
+            "prefix='/sdk=a'", "absolute path in 'prefix=/sdk=a'", "absolute path in 'Cflags: -I/usr/include:unused'",
+        ])
+        self.assertEqual(build.pc_problems(RUNTIME_PC + "resource=some=label /opt/sdk\n"), [
+            "absolute path in 'resource=some=label /opt/sdk'",
+        ])
+        self.assertEqual(build.pc_problems(RUNTIME_PC + "Libs.private: -lz\nLibs: -ldav1d\n"), [
+            "static link flags '-lz'", "bundled library flag in 'Libs: -ldav1d'",
+        ])
 
     def test_prune_runtime_stage_keeps_libraries_and_headers(self):
         for relative in ("bin/ffmpeg", "bin/ffprobe", "lib/libavcodec.so.63.4.100", "include/libavutil/avutil.h", "share/man/man1/ffmpeg.1"):
