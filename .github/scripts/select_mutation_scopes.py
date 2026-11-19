@@ -15,6 +15,8 @@ SCOPES = {
     }),
     "audit": frozenset({"audit"}),
     "bootstrap": frozenset({"_digest", "_wheel"}),
+    "collector": frozenset({"archive_commit", "assemble", "check_manifest", "expected_assets", "expected_stems", "main"}),
+    "dispatch": frozenset({"main"}),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
     "sdk": frozenset({"audit_sdk"}),
@@ -29,7 +31,10 @@ INPUT_DIRECTORIES = (".github/", "patches/", "profiles/", "scripts/", "tests/")
 
 
 def scope_source(scope: str) -> str:
-    return "bootstrap.py" if scope == "bootstrap" else "build.py"
+    return {
+        "bootstrap": "bootstrap.py",
+        "collector": ".github/scripts/assemble_release.py",
+    }.get(scope, "build.py")
 
 
 def module_shape(source: bytes) -> tuple[list[str], dict[str, str]]:

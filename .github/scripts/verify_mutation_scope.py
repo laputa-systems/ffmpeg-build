@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from importlib import import_module
 from pathlib import Path
+from shutil import copyfile
 
 from select_mutation_scopes import SCOPES, module_shape, scope_source
 
@@ -22,19 +23,34 @@ def main() -> None:
 
     members = SCOPES[args.scope]
     source = Path(scope_source(args.scope))
-    module = f"{source.stem}."
+    staged_source = source
+    also_copy = ["tests", "sources.lock.json", ".work/cache/sources"]
+    tests = {
+        "bootstrap": "tests/test_bootstrap.py",
+        "collector": "tests/test_assemble_release.py",
+        "dispatch": "tests/test_cli.py",
+    }.get(args.scope, "tests/test_build.py")
+    if args.scope in {"bootstrap", "collector", "dispatch"}:
+        subprocess.run([sys.executable, "-c", "import bootstrap"], check=True)
+    if args.scope != "bootstrap":
+        also_copy.extend(("bootstrap.py", "profiles", ".github/scripts", "patches", "scripts", "Makefile"))
+    if args.scope == "collector":
+        staged_source = Path("workflow/scripts/assemble_release.py")
+        staged_source.parent.mkdir(parents=True)
+        copyfile(source, staged_source)
+        test_file = Path(tests)
+        test = test_file.read_text(encoding="utf-8")
+        start = test.index("spec = importlib.util")
+        end = test.index("sys.path.insert", start)
+        test_file.write_text(test[:start] + "from workflow.scripts import assemble_release\n" + test[end:], encoding="utf-8")
+        also_copy.append("build.py")
+
+    module = ".".join((*staged_source.with_suffix("").parts, ""))
     prefixes = tuple(f"{module}x_{name}__mutmut_" for name in sorted(members))
     pyproject = Path("pyproject.toml")
-    also_copy = ["tests", "sources.lock.json", ".work/cache/sources"]
-    tests = "tests/test_bootstrap.py"
-    if args.scope == "bootstrap":
-        subprocess.run([sys.executable, "-c", "import bootstrap"], check=True)
-    else:
-        also_copy.extend(("bootstrap.py", "profiles", ".github/scripts", "patches", "scripts", "Makefile"))
-        tests = "tests/test_build.py"
     with pyproject.open("a", encoding="utf-8") as config:
         config.write(
-            f"\n[tool.mutmut]\nsource_paths = {json.dumps([str(source)])}\n"
+            f"\n[tool.mutmut]\nsource_paths = {json.dumps([str(staged_source)])}\n"
             f"also_copy = {json.dumps(also_copy)}\n"
             f"pytest_add_cli_args_test_selection = {json.dumps([tests])}\nuse_setproctitle = false\n"
         )
@@ -44,7 +60,7 @@ def main() -> None:
         check=True,
     )
 
-    generated = Path("mutants") / source
+    generated = Path("mutants") / staged_source
     metadata = generated.with_suffix(".py.meta")
     spans = generated.with_suffix(".py.spans")
     root = Path.cwd().resolve(strict=True)
