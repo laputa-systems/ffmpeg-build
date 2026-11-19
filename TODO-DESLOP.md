@@ -819,6 +819,24 @@ directly and varies each input file. Run the usual `tests/test_build.py`
 mutation selection with the four function names above. The focused
 tests, ordinary suite and linters passed.
 
+The configure handoff and configuration readers at `44e2a2e5`
+caught 354 of 356 matched macOS ARM64 mutations, up from 238.
+The two `configure_args_for` survivors (112 and 113) rename the
+FFmpeg working directory in the relative-path calculation. Both
+controller callers derive the dependency prefix as a sibling of
+the FFmpeg build directory or under the separate stage tree, so
+the relative paths stay the same.
+
+The fixtures check complete Linux tools and macOS SDK/runtime
+configure arguments, all enabled component categories, ignored
+lines before valid declarations, external-library filters, and
+independent failures for network and other incompatible features.
+Use the controller archive with `tests/test_build.py`, mutmut 3.8.1,
+pytest 9.2.0, one mutation worker, and `configure_args_for`,
+`parse_components`, `parse_config_mak`, `parse_external_libraries`,
+`parse_configuration`, and `component_problems`.
+All 152 controller tests and linters passed.
+
 ## Tickets
 
 
