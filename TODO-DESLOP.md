@@ -486,6 +486,31 @@ moved from 502 to 531 catches with no lost catches. Use the same
 three-test selector and archive recipe above. All 120 ordinary tests,
 Ruff and ty passed. DSLP-4 retains the 165 remaining outcomes.
 
+The audit now checks the native-host rejection and the three actual
+missing inputs in sequence. The fixture first supplies the wrong
+native target, then the right target with an absent build tree,
+missing stage and missing generated component header. On the same
+696 identities at `9e44f604`, adding `audit_requires_native_host`
+to the selector raised catches from 531 to 539. All previous
+catches held. All 121 ordinary tests, Ruff and ty passed.
+
+Of the 157 survivors, 28 change only string literals in arguments
+that print diagnostics. Comparing each generated function with
+`x_audit__mutmut_orig` leaves the AST structure, checks and exit
+behavior unchanged. These identities use the
+`build.x_audit__mutmut_` prefix with these suffixes:
+
+```text
+117, 118, 163, 164, 170, 171, 181, 182, 188, 189, 239, 240, 250, 251,
+267, 268, 491, 492, 529, 530, 556, 557, 620, 621, 622, 641, 650, 651
+```
+
+The dispositions apply to `build.py` SHA-256
+`e70b86b8922bc65d31e5182df1e70fbc1f890735bcdd97efc11615684c1f1fb3`.
+`Audit.case` records the boolean separately from the printed label
+and detail. The pipeline uses the resulting status. DSLP-4 retains
+the 129 other outcomes and the whole-change lane.
+
 ## Tickets
 
 
