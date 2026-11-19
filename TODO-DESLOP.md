@@ -762,8 +762,8 @@ explicit encoding.
 
 **Source acquisition**
 
-The source fixture uses two local archives through the normal lock
-reader, verified cache and extraction command. It checks source
+The source fixture passes two locked local archives through the
+verified cache and extraction command. It checks source
 order, exact cached bytes, reuse of the extraction directory,
 rejection of missing profile entries and missing archive roots,
 and preservation of an existing cache object after an unavailable
