@@ -573,8 +573,82 @@ unchanged manifest parser catches all 82 after the new positive
 case. The four package survivors numbered 30, 32, 34 and 167 change
 manifest or lock-file path casing. The other two survivors,
 `package` 89 and `qualify` 179, supply a different fallback that
-still fails the same producer-commit check. Native packaging and
-qualification accounting remain open.
+still fails the same producer-commit check.
+
+The hosted artifact repeat at `21ce80e4dc1cf9aad253962507d09151909120e6`
+has the same 621 selected identities and source spans on all three
+hosts. Both Linux architectures catch all four path-case edits.
+Their 619 catches and the 615 on macOS account for the remainder
+with the two equivalent producer-commit fallbacks above. The
+five named artifact functions are fully dispositioned. Decode the
+chunked receipts as for the audit run. The complete spans SHA-256
+is `c66726a53408c86be0a5b58737867dea07c4f25e956baed313bf7bb33f10e116`.
+[Native artifact repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44438978427)
+
+Running the full Python controller file at `4af3726` exercised all
+293 ELF and Mach-O runtime helper identities and caught them all.
+It caught 30 of 41 Linux configuration identities. The same
+selection reported no tests for the 288 SDK, 232 tools and 373
+runtime coordinator identities.
+
+The direct SDK fixtures now exercise the empty stage and a
+populated Linux stage with regular headers, archives and pkg-config
+metadata. The object tools return recorded fixture output at the
+invocation boundary. The audit selects object files, checks the
+ABI and package metadata, rejects incorrect staged contents and
+clears the object scratch. The SDK selection now exercises all
+288 identities and catches 214. Reuse the artifact archive recipe
+with `build.x_audit_sdk__mutmut_*`. The 74 survivors remain in
+DSLP-4. All 125 ordinary tests and both linters passed.
+
+A second SDK fixture exercises an archive with no object members and
+an unlisted bundled dependency. It checks the extraction tool's arguments
+and scratch location, both audit failures, and cleanup after rejection.
+With unchanged source and matching spans, the same 288-identity selection
+catches 229, up from 214. The 59 survivors remain under DSLP-4. All 126
+ordinary tests and both linters passed.
+
+The tools audit now runs two staged command fixtures and consumes
+recorded Linux and macOS inspection output. A second inspection of
+the same commands rejects a stale version, network support, incompatible
+binary formats and linkage. The missing-program case also rejects a
+tools stage with developer headers. With the same 232 tool-audit
+identities and spans, the valid and missing-program cases caught 149.
+The additional negative inspections caught 45 more, for 194 of 232.
+Reproduce with the SDK archive recipe and
+`build.x_audit_tools__mutmut_*`. The 38 survivors remain in DSLP-4.
+All 127 ordinary tests and both linters passed.
+
+The staged runtime audit now reads seven versioned libraries, their
+links and headers, and the corresponding pkg-config and manifest data.
+The coordinator uses the appropriate binary inspector for each program
+and library. The rejected stages change a library digest, add a bundled
+header, and alter the reported protocols and encoders. The case covers
+Linux and macOS inspection output. The specialized native inspectors
+keep their separate direct checks.
+
+The current runtime coordinator selection caught 266 of 373 identities.
+The earlier selection found no tests for these identities. Reproduce
+with `build.x_audit_runtime__mutmut_*` and the same archive recipe as
+the tools selection. The 107 survivors remain in DSLP-4. All 128
+ordinary tests and both linters passed.
+
+The tools audit now requires successful exit status from both
+`-version` and `-buildconf`. The previous audit accepted both outputs
+from commands that exited 7. A staged shell fixture reproduces that
+false pass and verifies both failures after the fix. The suite also
+checks empty version output, both Apple audio encoder names, a missing
+bin directory, continued probing after the first program is absent,
+and the alternate static-link description.
+
+The current tools audit selection catches 214 of 240 identities with
+the same pinned archive recipe. Five variants preserve the decision:
+33 supplies another falsy value and 42, 46, 74 and 78 leave
+`subprocess.run` checking disabled. Variant 59 changes the displayed
+empty output. Variants 11, 14, 62, 65, 89, 92, 114, 117, 129, 132,
+145, 148, 160, 163, 190, 193, 205, 208, 236 and 239 remove optional
+diagnostic details. All 128 ordinary tests and both linters passed.
+The native repeat and wider audit scopes remain under DSLP-4.
 
 ## Tickets
 
@@ -584,7 +658,7 @@ qualification accounting remain open.
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The complete audit entry point is dispositioned across three hosted architectures and OS combinations. Qualification survivors, wider native effects and a fail-closed whole-change mutation lane remain open.
+- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The audit entry point and five artifact functions are dispositioned across three hosts. Specialized native audit functions and a fail-closed whole-change mutation lane remain open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M

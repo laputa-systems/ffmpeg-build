@@ -597,6 +597,237 @@ class StageTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()) as stdout:
                     self.assertEqual(build.audit(target, "tools"), 0, stdout.getvalue())
 
+    def test_tools_audit_requires_both_programs_and_the_native_binary_contract(self):
+        binaries = self.stage / "bin"
+        binaries.mkdir(parents=True)
+        for name in ("ffmpeg", "ffprobe"):
+            binary = binaries / name
+            binary.write_text(
+                "#!/bin/sh\n"
+                'case "$1:$2" in\n'
+                f'  -hide_banner:-version) printf "%s\\n" "{name} version 9.0.2 fixture" ;;\n'
+                '  -hide_banner:-buildconf) printf "%s\\n" "--disable-network" ;;\n'
+                "  *) exit 1 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            binary.chmod(0o755)
+
+        def run_audit(config, inspection, expected_failures):
+            with mock.patch.object(build, "output", side_effect=inspection), redirect_stdout(io.StringIO()) as stdout:
+                audit = build.Audit()
+                build.audit_tools(audit.case, config, self.stage, "9.0.2")
+                self.assertEqual(audit.finish(), int(bool(expected_failures)), stdout.getvalue())
+            self.assertEqual(
+                [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                expected_failures,
+            )
+
+        def linux_inspection(arguments):
+            match arguments:
+                case ["file", "-b", _]:
+                    return "ELF 64-bit LSB pie executable, ARM aarch64, static-pie linked"
+                case ["readelf", "-lW", _]:
+                    return "GNU_STACK 0x000000 0x000000 0x000000 0x000000 0x200000 RW 0x10"
+                case ["readelf", "-dW", _] | [_, "-hide_banner", "-encoders"]:
+                    return ""
+                case _:
+                    self.fail(f"unexpected inspection: {arguments}")
+
+        def macos_inspection(arguments):
+            match arguments:
+                case ["file", "-b", _]:
+                    return "Mach-O 64-bit executable arm64"
+                case ["otool", "-L", binary]:
+                    return f"{binary}:\n /usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
+                case _:
+                    self.fail(f"unexpected inspection: {arguments}")
+
+        linux = {"platform": "linux", "arch": "aarch64"}
+        macos = {"platform": "macos", "arch": "aarch64"}
+        run_audit(linux, linux_inspection, [])
+        run_audit(macos, macos_inspection, [])
+
+        def classic_static_inspection(arguments):
+            if arguments[:2] == ["file", "-b"]:
+                return "ELF 64-bit LSB executable, ARM aarch64, statically linked"
+            return linux_inspection(arguments)
+
+        run_audit(linux, classic_static_inspection, [])
+        def incorrect_linux_inspection(arguments):
+            match arguments:
+                case ["file", "-b", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "ELF 64-bit LSB pie executable, x86-64, dynamically linked"
+                case ["readelf", "-lW", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "INTERP\nGNU_STACK 0x0 0x0 0x0 0x0 0x100000 RW 0x10"
+                case ["readelf", "-dW", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "0x0000000000000001 (NEEDED) Shared library: [libc.so.6]"
+                case [binary, "-hide_banner", "-encoders"] if pathlib.Path(binary).name == "ffmpeg":
+                    return "V..... h264_videotoolbox"
+                case _:
+                    return linux_inspection(arguments)
+
+        def incorrect_macos_inspection(arguments):
+            match arguments:
+                case ["file", "-b", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "Mach-O 64-bit executable x86_64"
+                case ["otool", "-L", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return f"{binary}:\n /opt/local/lib/libz.1.dylib (compatibility version 1.0.0)\n"
+                case _:
+                    return macos_inspection(arguments)
+
+        ffmpeg = binaries / "ffmpeg"
+        original = ffmpeg.read_text(encoding="utf-8")
+        ffmpeg.write_text(
+            original.replace("9.0.2", "9.0.1").replace("--disable-network", "--enable-network")
+            + "# GLIBC_2.17\n",
+            encoding="utf-8",
+        )
+        run_audit(linux, incorrect_linux_inspection, [
+            "ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network",
+            "ffmpeg is ARM aarch64 ELF", "ffmpeg is statically linked", "ffmpeg has no INTERP",
+            "ffmpeg thread stack is 2097152 B", "ffmpeg has no NEEDED",
+            "ffmpeg has no glibc symbol versions", "ffmpeg has no Apple encoders",
+        ])
+        run_audit(macos, incorrect_macos_inspection, [
+            "ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network",
+            "ffmpeg is Mach-O arm64", "ffmpeg links only system libraries", "ffmpeg links no dynamic zlib",
+        ])
+        ffmpeg.write_text(original.replace(";;", "; exit 7 ;;"), encoding="utf-8")
+        run_audit(linux, linux_inspection, ["ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network"])
+        ffmpeg.write_text(original.replace('printf "%s\\n" "ffmpeg version 9.0.2 fixture"', "exit 0"), encoding="utf-8")
+        run_audit(linux, linux_inspection, ["ffmpeg reports 9.0.2"])
+        ffmpeg.write_text(original, encoding="utf-8")
+        for forbidden in ("aac_at", "audiotoolbox"):
+            with self.subTest(encoder=forbidden):
+                def encoder_inspection(arguments, encoder=forbidden):
+                    if arguments == [str(ffmpeg), "-hide_banner", "-encoders"]:
+                        return encoder
+                    return linux_inspection(arguments)
+
+                run_audit(linux, encoder_inspection, ["ffmpeg has no Apple encoders"])
+        (self.stage / "include").mkdir()
+        (self.stage / "lib").mkdir()
+        ffmpeg.unlink()
+        ffprobe = binaries / "ffprobe"
+        ffprobe_script = ffprobe.read_text(encoding="utf-8")
+        ffprobe.write_text(ffprobe_script.replace("9.0.2", "9.0.1"), encoding="utf-8")
+        run_audit(linux, linux_inspection, [
+            "programs are ffmpeg and ffprobe", "no include/ in tools stage",
+            "no lib/ in tools stage", "ffmpeg present", "ffprobe reports 9.0.2",
+        ])
+        (binaries / "ffprobe").unlink()
+        binaries.rmdir()
+        run_audit(linux, linux_inspection, [
+            "programs are ffmpeg and ffprobe", "no include/ in tools stage",
+            "no lib/ in tools stage", "ffmpeg present", "ffprobe present",
+        ])
+
+    def test_runtime_audit_binds_stage_libraries_and_command_results(self):
+        for platform, hwaccel in (("linux", "vaapi"), ("macos", "videotoolbox")):
+            with self.subTest(platform=platform):
+                self.check_runtime_audit(platform, hwaccel)
+
+    def check_runtime_audit(self, platform, hwaccel):
+        libraries = ("libavcodec", "libavdevice", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
+        stage = self.stage / platform
+        binaries = stage / "bin"
+        binaries.mkdir(parents=True)
+        for program in ("ffmpeg", "ffprobe"):
+            (binaries / program).write_bytes(b"runtime program fixture")
+        pkgconfig = stage / "lib" / "pkgconfig"
+        pkgconfig.mkdir(parents=True)
+        entries = {}
+        identities = {}
+        objects = {binaries / "ffmpeg": "program", binaries / "ffprobe": "program"}
+        for library in libraries:
+            header = stage / "include" / library / f"{library[3:]}.h"
+            header.parent.mkdir(parents=True)
+            header.write_bytes(b"runtime header fixture")
+            if platform == "linux":
+                base, major, shared = f"{library}.so.1.2.3", f"{library}.so.1", f"{library}.so"
+                identity, key = major, "soname"
+            else:
+                base, major, shared = f"{library}.1.2.3.dylib", f"{library}.1.dylib", f"{library}.dylib"
+                identity, key = f"@rpath/{major}", "install_name"
+            path = stage / "lib" / base
+            path.write_bytes(library.encode())
+            (path.parent / major).symlink_to(base)
+            (path.parent / shared).symlink_to(major)
+            (pkgconfig / f"{library}.pc").write_text("prefix=${pcfiledir}/../..\n", encoding="utf-8")
+            identities[path] = identity
+            objects[path] = "library"
+            entries[library] = {
+                "file": f"lib/{base}",
+                "links": sorted((f"lib/{major}", f"lib/{shared}")),
+                key: identity,
+                "sha256": hashing.sha256_file(path),
+            }
+
+        command_outputs = {
+            "-buildconf": "--disable-network",
+            "-protocols": "Input:\n  file\nOutput:\n  file\n",
+            "-encoders": "------\n V..... aac\n",
+            "-hwaccels": f"Hardware acceleration methods:\n{hwaccel}\n",
+        }
+
+        def output(arguments):
+            match arguments:
+                case ["readelf", "-dW", binary]:
+                    return f"0x000000000000000e (SONAME) Library soname: [{identities[pathlib.Path(binary)]}]"
+                case ["otool", "-l", binary]:
+                    return f"Load command 0\n cmd LC_ID_DYLIB\n name {identities[pathlib.Path(binary)]} (offset 24)\n"
+                case [binary, "-hide_banner", flag]:
+                    self.assertEqual(pathlib.Path(binary), binaries / "ffmpeg")
+                    return command_outputs[flag]
+                case _:
+                    self.fail(f"unexpected inspection: {arguments}")
+
+        def version(arguments, **kwargs):
+            binary, *flags = arguments
+            path = pathlib.Path(binary)
+            self.assertEqual(path.parent, binaries)
+            self.assertEqual(flags, ["-hide_banner", "-version"])
+            self.assertEqual(kwargs, {"capture_output": True, "text": True, "check": False})
+            return subprocess.CompletedProcess(arguments, 0, stdout=f"{path.name} version 9.0.2 fixture\n", stderr="")
+
+        config = {"platform": platform, "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "output", side_effect=output),
+            mock.patch.object(build.subprocess, "run", side_effect=version),
+            mock.patch.object(build, "audit_runtime_elf") as elf,
+            mock.patch.object(build, "audit_runtime_macho") as macho,
+        ):
+            audit = build.Audit()
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
+                self.assertEqual(audit.finish(), 0, stdout.getvalue())
+            checker, other = (elf, macho) if platform == "linux" else (macho, elf)
+            other.assert_not_called()
+            self.assertCountEqual(checker.call_args_list, [
+                mock.call(audit.case, config, path, role, set(identities.values()))
+                for path, role in objects.items()
+            ])
+
+            (stage / "include" / "zlib.h").write_bytes(b"bundled header")
+            util = stage / entries["libavutil"]["file"]
+            util.write_bytes(b"changed runtime payload")
+            command_outputs["-protocols"] = "Input:\n  file\n  http\n"
+            command_outputs["-encoders"] = ""
+            audit = build.Audit()
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
+                self.assertEqual(audit.finish(), 1, stdout.getvalue())
+            self.assertEqual(
+                [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                [
+                    "no dav1d or zlib headers",
+                    "manifest libraries match the stage",
+                    "ffmpeg -protocols lists exactly the profile protocols",
+                    "ffmpeg -encoders lists exactly the profile encoders",
+                ],
+            )
+
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
         profile, profile_path = build.load_profile("runtime")
@@ -749,6 +980,129 @@ class StageTests(unittest.TestCase):
                         audit_sdk.call_args.args[1:],
                         (target, "play-sdk", config, stage, build.load_sources()["ffmpeg"].version),
                     )
+
+    def test_audit_sdk_checks_files_abi_and_object_scratch(self):
+        target = "aarch64-unknown-linux-musl"
+        profile_name = "play-sdk"
+        profile, _ = build.load_profile(profile_name)
+        config = build.target_config(profile, target)
+        stage = self.stage
+        version = "9.0.2"
+        headers = [
+            "libavcodec/avcodec.h", "libavformat/avformat.h", "libavfilter/avfilter.h",
+            "libavutil/avutil.h", "libswresample/swresample.h", "libswscale/swscale.h", "dav1d/dav1d.h", "zlib.h",
+        ]
+        for header in headers:
+            path = stage / "include" / header
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture header")
+        version_file = stage / "include" / "libavutil" / "ffversion.h"
+        version_file.write_text(f'#define FFMPEG_VERSION "{version}"\n')
+        pc = stage / "lib" / "pkgconfig" / "libavutil.pc"
+        pc.parent.mkdir(parents=True)
+        pc.write_text("prefix=${pcfiledir}/../..\nLibs.private: -lva -lva-drm\n")
+        archives = [stage / "lib" / name for name in ("libavutil.a", "libdav1d.a", "libz.a")]
+        for archive in archives:
+            archive.write_bytes(b"fixture archive")
+
+        scratch = pathlib.Path(self.temp.name) / "objects"
+        previous = scratch / f"audit-{target}-{profile_name}-libavutil.a"
+        previous.mkdir(parents=True)
+        stale = previous / "obsolete.o"
+        stale.write_bytes(b"discarded")
+        object_kind = "ELF 64-bit LSB relocatable, ARM aarch64"
+
+        def run_fixture(arguments, **options):
+            if arguments[0] == "ar":
+                destination = options["cwd"]
+                self.assertEqual(destination.parent, scratch)
+                self.assertTrue(options["quiet"])
+                self.assertIn(pathlib.Path(arguments[2]), archives)
+                self.assertEqual(arguments[1], "x")
+                self.assertFalse(stale.exists())
+                nested = destination / "objects"
+                nested.mkdir()
+                for name in ("first.o", "second.obj", "note.txt"):
+                    (nested / name).write_bytes(b"fixture member")
+                return subprocess.CompletedProcess(arguments, 0, stdout="")
+            self.assertEqual(arguments[:2], ["file", "-b"])
+            self.assertEqual([pathlib.Path(path).name for path in arguments[2:]], ["first.o", "second.obj"])
+            self.assertTrue(options["capture"])
+            return subprocess.CompletedProcess(arguments, 0, stdout=f"{object_kind}\n{object_kind}\n")
+
+        with (
+            mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "run", side_effect=run_fixture),
+        ):
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 0, stdout.getvalue())
+            self.assertEqual(list(scratch.iterdir()), [])
+
+            version_file.write_text("#define OTHER_VERSION 1\n")
+            (stage / "bin").mkdir()
+            (stage / "bin" / "ffprobe").write_bytes(b"unexpected program")
+            (stage / "include" / "zlib.h").unlink()
+            archives[0].write_bytes(b"fixture GLIBC_ symbol version")
+            archives[2].unlink()
+            pc.write_text(f"prefix={stage}\nLibs.private: -lva\n")
+            object_kind = "LLVM bitcode"
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 1, stdout.getvalue())
+            problems = [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")]
+            self.assertEqual(problems, [
+                f"ffversion is {version}", "no programs installed", "headers present",
+                "bundled zlib archive", "libavutil.pc relocatable",
+                "archives contain object code, not bitcode", "no glibc symbol versions", "pkg-config declares libva-drm",
+            ])
+            self.assertEqual(list(scratch.iterdir()), [])
+
+    def test_audit_sdk_reports_an_empty_stage_without_running_tools(self):
+        target = "aarch64-apple-darwin"
+        config = {"platform": "macos", "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "run") as tool,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            check = build.Audit()
+            build.audit_sdk(check.case, target, "play-sdk", config, self.stage, "9.0.2")
+            self.assertEqual(check.finish(), 1, stdout.getvalue())
+        tool.assert_not_called()
+        self.assertEqual([
+            line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")
+        ], ["ffversion is 9.0.2", "headers present", "pkg-config files present", "static archives present"])
+
+    def test_audit_sdk_rejects_an_archive_without_objects(self):
+        scratch = pathlib.Path(self.temp.name) / "fresh" / "objects"
+        target = "aarch64-unknown-linux-musl"
+        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted"]}
+        profile = "play-sdk"
+        archive = self.stage / "lib" / "libempty.a"
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b"fixture archive")
+
+        def extract(arguments, *, cwd, quiet):
+            self.assertEqual(arguments, ["ar", "x", str(archive)])
+            self.assertTrue(quiet)
+            self.assertEqual(cwd, scratch / f"audit-{target}-{profile}-{archive.name}")
+            (cwd / "note.txt").write_bytes(b"no object members")
+            return subprocess.CompletedProcess(arguments, 0)
+
+        with (
+            mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "run", side_effect=extract) as tool,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            check = build.Audit()
+            build.audit_sdk(check.case, target, profile, config, self.stage, "9.0.2")
+            self.assertEqual(check.finish(), 1, stdout.getvalue())
+        tool.assert_called_once()
+        self.assertIn("FAIL audit: bundled dependency unlisted: unknown bundled dependency", stdout.getvalue())
+        self.assertIn("FAIL audit: archives contain object code, not bitcode: libempty.a: no objects", stdout.getvalue())
+        self.assertEqual(list(scratch.iterdir()), [])
 
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
