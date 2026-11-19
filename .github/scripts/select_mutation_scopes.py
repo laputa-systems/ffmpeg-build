@@ -15,6 +15,7 @@ SCOPES = {
     }),
     "audit": frozenset({"audit"}),
     "bootstrap": frozenset({"_digest", "_wheel"}),
+    "build": frozenset({"build"}),
     "collector": frozenset({"archive_commit", "assemble", "check_manifest", "expected_assets", "expected_stems", "main"}),
     "dispatch": frozenset({"main"}),
     "runtime": frozenset({"audit_runtime"}),
