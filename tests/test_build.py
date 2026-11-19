@@ -433,6 +433,25 @@ class StageTests(unittest.TestCase):
                  ["no unrequested encoders", "requested encoders present", "manifest components match build tree",
                   "manifest auto-selected match build tree"]),
             )
+            manifest_mismatches = (
+                ("components", {}, "manifest components match build tree"),
+                ("auto_selected", {"encoders": ["aac"]}, "manifest auto-selected match build tree"),
+                ("external_libraries", ["dav1d"], "manifest external libraries"),
+                ("bundled_dependencies", [], "manifest bundled dependencies"),
+                ("frameworks", ["CoreMedia"], "manifest frameworks"),
+                ("system_libraries", ["libva"], "manifest system libraries"),
+                ("configure_args", [], "manifest configure arguments"),
+                ("configure", "--disable-network", "manifest effective configure"),
+                ("license", "LGPL version 2.1 or later", "manifest license is GPL version 2 or later"),
+                ("toolchain", toolchain | {"cc": ""}, "manifest toolchain"),
+                ("toolchain", toolchain | {"sysroot": ""}, "manifest toolchain"),
+                ("toolchain", toolchain | {"cpu_baseline": ""}, "manifest toolchain"),
+                ("toolchain", toolchain | {"libc": "glibc"}, "manifest libc is musl"),
+            )
+            cases += tuple(
+                (valid | {field: value}, good_config, good_components, [failure])
+                for field, value, failure in manifest_mismatches
+            )
             for manifest, config_text, component_text, failures in cases:
                 with self.subTest(failures=failures), redirect_stdout(io.StringIO()) as stdout:
                     manifest_file.write_text(json.dumps(manifest))
