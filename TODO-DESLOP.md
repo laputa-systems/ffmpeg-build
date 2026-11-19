@@ -701,6 +701,15 @@ capabilities. The matched local runtime selection catches 316 of
 376 identities, 41 more than the previous fixture. All 129 ordinary
 tests and both linters passed.
 
+The runtime fixture now requires the native library identity
+command for the selected platform. It checks that ffprobe is still
+probed after a missing ffmpeg, that empty version output is rejected,
+and that omitted capability lists are read as empty. The Linux case
+also names both dav1d and zlib configuration headers in its rejection.
+The matched local selection catches 329 of 376 identities, 13 more
+than the preceding fixture. All 130 ordinary tests and both linters
+passed. Native runtime repetition remains in DSLP-4.
+
 ## Tickets
 
 
