@@ -885,18 +885,77 @@ controller archive with one worker. Select `merged_components`,
 and `macos_linked_libraries`. All 164 controller tests and both
 linters passed.
 
+**Tests (DSLP-4) complete**
+
+The retained workflow in [#62](https://github.com/laputa-systems/ffmpeg-build/pull/62)
+ran 22 scopes at `465e86b08344694997a233306e4e7c508cb9f0d2`.
+All 66 native jobs, the final gate, and ordinary CI passed. Both
+Linux architectures caught 5,135 of 5,330, with 195 reviewed
+survivors each. macOS ARM64 caught 5,054 of 5,330, with 276 reviewed
+survivors. No selected result was pending, timed out or missing.
+The individual reasons appear in the scope receipts above and
+`.github/mutation-scopes.json` binds each permitted identity to
+its source and rendered bytes.
+[Hosted results](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44469226166)
+
+`make mutants-diff` compares committed changes with `origin/main`.
+Set `MUTATION_BASE` to reproduce a historical merge base and
+`MUTATION_SCOPE` to run one selected scope. Hosted jobs use the
+same entry point with Python 3.15.2, locked mutmut 3.8.1 and pytest
+9.2.0, and the pinned Buildlib result reader. Changes to tests,
+fixtures, configuration or the mutation gate select the union of
+all governed scopes. Documentation-only changes pass explicitly.
+Unknown source changes fail during selection.
+
+The earlier hosted control combined an equivalent ELF edit with
+a removed tools test. The three tools jobs and final gate failed
+while ordinary CI passed. At `f773d3f6`, a fresh local control
+reordered the GNU stack equality and removed
+`test_manifest_matches_generated_configuration_and_source_lock`.
+Ordinary tests passed 162 cases. The planner selected the union
+and the provenance verifier rejected the 107 manifest variants
+with no selected test. Both controls left the shipping source
+and tests intact.
+[Hosted deletion control](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44455548747)
+
+The archive contains the controller, the executable checks and
+the release collector. The remaining private decision regions
+have these verification boundaries.
+
+- `fail`, `run`, `output` and `jobs` adapt subprocess execution
+  and errors. The CLI subprocess fixtures and the native artifact
+  build logs exercise the actual commands and failure reports.
+- `dedupe`, `configure_component`, `build_paths`, `avdevice_args`,
+  `runtime_link_args`, `linker_response` and `write_linker_responses`
+  feed scoped configure and staging contracts. The exact flag,
+  response-file and stage-layout assertions exercise their outputs.
+- `dep_env`, `prefix_map_flag`, `ffmpeg_env`, `build_zlib`,
+  `build_dav1d`, `cmake_build`, `build_x264`, `build_x265`,
+  `drop_shared_libgcc`, `build_svtav1`, `build_vpx`,
+  `set_pc_prefix`, `build_lame` and `build_opus` hand off to the
+  real compilers and dependency builds. Native artifact checks
+  above exercise the locked inputs and compiled outputs.
+
+A fresh GitHub clone at the tested head passed 168 tests in 5.54
+seconds on the first `make test`, including environment setup.
+Three interleaved warm timings were 1.18–1.24 seconds for the
+76-test baseline and 3.28–4.46 seconds for the candidate. The
+medians were 1.22 and 3.30 seconds with `cpu-guard --cores 2`.
+Both readiness checks returned success and reported concurrent
+host activity. These are controller-suite costs. The added
+cost is within the 30-second allowance. `make lint` also passed.
+
+`make coverage` measured 1,458 of 1,526 statements and 612 of
+630 branches across `build.py`, `bootstrap.py` and the release
+collector. Including the two mutation gate scripts gives
+1,510 of 1,679 statements and 631 of 680 branches. The archive
+verifier runs in the native jobs and its controller-suite
+coverage is zero.
+
 ## Tickets
 
 
 
-### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
-
-- **Area:** deslop · tests
-- **Where:** test suites and CI
-- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The audit entry point and five artifact functions are dispositioned across three hosts. Specialized native audit functions and a fail-closed whole-change mutation lane remain open.
-- **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-5 · P2 · Dead code: tools and debloat
 

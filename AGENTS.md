@@ -34,8 +34,9 @@ python3 -m unittest discover -s tests
 
 ## Verification
 
-- On macOS arm64, `make test`: cold 0.41s (created `.venv`), warm 0.28s; 73 tests each. `make lint`: first 0.57s, warm 0.12s (after test setup). Times are elapsed, not performance gates.
-- `make coverage` runs the controller suite with branch instrumentation over the three first-party Python modules. It prints a summary and writes `.work/coverage/report.json`.
+- On macOS ARM64, `make test` passed 168 controller tests in 5.54 seconds from a fresh clone and 3.30 seconds median across three warm runs. The native `make verify` suite separately checks actual artifacts after a build.
+- `make coverage` instruments the controller and gate code and writes `.work/coverage/report.json`.
+- `make mutants-diff` uses committed changes, locked tools and the configured critical scopes. The hosted lane runs it on both Linux architectures and macOS ARM64.
 - For package and qualification edits, `uv run --frozen python -m unittest discover -s tests -p test_build.py -k qualify` checks a sealed tools archive, manifest and native-script handoff. `make test` adds controller and release assembly coverage. `make verify` requires native artifacts.
 - `tests/test_cli.py` exercises the `build.py` version command, target rejection, and required package arguments through the process boundary. The Makefile and native Linux wrapper have separate usage paths.
 - `sources.lock.json` and profile configuration consumed by the builder: `tests/test_build.py` (`ProfileTests`, `RuntimeProfileTests`, `LicenseAndDeviceTests`, `FixturesProfileTests`); verified local source acquisition and extraction: `SourceAcquisitionTests`. Upstream downloads and full builds run separately.
