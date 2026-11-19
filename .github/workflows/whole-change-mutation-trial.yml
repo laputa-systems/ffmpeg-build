@@ -1,0 +1,94 @@
+name: FFmpeg controller mutation
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whole-change-mutation-${{ github.head_ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      scopes: ${{ steps.select.outputs.scopes }}
+      buildlib: ${{ steps.pin.outputs.rev }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: pin
+        run: printf 'rev=%s\n' "$(< .github/mutation-buildlib-revision)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: ${{ steps.pin.outputs.rev }}
+          path: .work/buildlib
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - name: Check the mutation selection contract
+        run: uv run --frozen --python 3.15.2 python -m unittest discover -s tests -p test_mutation_selection.py
+      - id: select
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          scopes=$(uv run --frozen --python 3.15.2 python .github/scripts/select_mutation_scopes.py "$BASE" .work/buildlib/scripts)
+          if [ "$scopes" = '[]' ]; then
+            scopes='["documentation"]'
+          fi
+          printf 'scopes=%s\n' "$scopes" >> "$GITHUB_OUTPUT"
+          printf 'Selected scopes %s\n' "$scopes"
+
+  native:
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: ${{ fromJSON(needs.plan.outputs.scopes) }}
+        runner: [ubuntu-26.04, ubuntu-26.04-arm, xcode-27]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: ${{ needs.plan.outputs.buildlib }}
+          path: .work/buildlib
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - name: Measure selected mutations in the committed archive
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          SCOPE: ${{ matrix.scope }}
+        run: make mutants-diff MUTATION_BASE="$BASE" MUTATION_SCOPE="$SCOPE" MUTATION_BUILDLIB=.work/buildlib
+
+  whole-change:
+    if: always()
+    needs: [plan, native]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      PLAN: ${{ needs.plan.result }}
+      NATIVE: ${{ needs.native.result }}
+    steps:
+      - run: |
+          test "$PLAN" = success
+          test "$NATIVE" = success

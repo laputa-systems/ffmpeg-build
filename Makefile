@@ -9,6 +9,9 @@ else
 TARGET ?= x86_64-unknown-linux-musl
 endif
 PROFILES ?= play-sdk tools runtime $(if $(filter x86_64-unknown-linux-musl,$(TARGET)),fixtures)
+MUTATION_BASE ?= origin/main
+MUTATION_SCOPE ?=
+MUTATION_BUILDLIB ?= $(HOME)/repos/laputa-systems/buildlib
 VERSION = $(shell $(PYTHON) build.py version)
 
 ifneq ($(findstring linux,$(TARGET)),)
@@ -19,7 +22,7 @@ build_profile = $(PYTHON) build.py build --target $(TARGET) --profile $(1) && $(
 verify_archive = $(PYTHON) build.py qualify --archive $(1)
 endif
 
-.PHONY: coverage fetch build package verify lint test clean
+.PHONY: coverage mutants-diff fetch build package verify lint test clean
 
 fetch:
 	@set -eu; for profile in $(PROFILES); do $(PYTHON) build.py fetch --target $(TARGET) --profile $$profile; done
@@ -48,6 +51,9 @@ coverage:
 	uv run --frozen coverage combine
 	uv run --frozen coverage report
 	uv run --frozen coverage json -o .work/coverage/report.json
+
+mutants-diff:
+	scripts/mutants-diff.sh "$(MUTATION_BASE)" "$(MUTATION_BUILDLIB)" "$(MUTATION_SCOPE)"
 
 lint:
 	uv run --frozen ruff check .
