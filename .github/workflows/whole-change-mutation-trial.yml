@@ -1,0 +1,111 @@
+name: FFmpeg whole-change mutation trial
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whole-change-mutation-${{ github.head_ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      scopes: ${{ steps.select.outputs.scopes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: 6b2f4deb0a9afe024665863b6dd629fcfbd3c918
+          path: .work/buildlib
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - id: select
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          scopes=$(uv run --frozen --python 3.15.2 python .github/scripts/select_mutation_scopes.py "$BASE" .work/buildlib/scripts)
+          printf 'scopes=%s\n' "$scopes" >> "$GITHUB_OUTPUT"
+          printf 'Selected scopes %s\n' "$scopes"
+
+  native:
+    needs: plan
+    if: needs.plan.outputs.scopes != '[]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: ${{ fromJSON(needs.plan.outputs.scopes) }}
+        runner: [ubuntu-26.04, ubuntu-26.04-arm, xcode-27]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: 6b2f4deb0a9afe024665863b6dd629fcfbd3c918
+          path: .work/buildlib
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - name: Measure selected mutations in the committed archive
+        env:
+          SCOPE: ${{ matrix.scope }}
+          NATIVE_RUNNER: ${{ matrix.runner }}
+        run: |
+          root="$PWD"
+          mkdir -p .work/tmp
+          proof=$(mktemp -d "$root/.work/tmp/whole-change.XXXXXXXX")
+          mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
+          touch "$proof/.work/cache/sources/.keep"
+          export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+          git archive HEAD | tar -x -C "$proof"
+          cat >> "$proof/pyproject.toml" <<'TOML'
+
+          [tool.mutmut]
+          source_paths = ["build.py"]
+          also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles",
+                       ".work/cache/sources", ".github/scripts", "patches", "scripts", "Makefile"]
+          pytest_add_cli_args_test_selection = ["tests/test_build.py"]
+          use_setproctitle = false
+          TOML
+          uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
+            cd "$1"
+            python .github/scripts/verify_mutation_scope.py "$2" "$3" "$4"
+          ' whole-change "$proof" "$SCOPE" "$NATIVE_RUNNER" "$root/.work/buildlib/scripts"
+
+  whole-change:
+    if: always()
+    needs: [plan, native]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      PLAN: ${{ needs.plan.result }}
+      NATIVE: ${{ needs.native.result }}
+      SCOPES: ${{ needs.plan.outputs.scopes }}
+    steps:
+      - run: |
+          test "$PLAN" = success
+          if [ "$SCOPES" = '[]' ]; then
+            test "$NATIVE" = skipped
+          else
+            test "$NATIVE" = success
+          fi
