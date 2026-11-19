@@ -1,4 +1,4 @@
-name: native artifact mutation census
+name: native tools and runtime audit mutation census
 
 on: pull_request
 
@@ -9,7 +9,7 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  artifacts:
+  native-audits:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
@@ -32,9 +32,9 @@ jobs:
         with:
           version: 0.13.7
       - run: uv python install 3.15.2
-      - name: Measure and account for artifact identities
+      - name: Measure and account for tools and runtime audit identities
         run: |
-          proof="$PWD/.work/tmp/artifact-proof"
+          proof="$PWD/.work/tmp/audit-proof"
           mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
           touch "$proof/.work/cache/sources/.keep"
           export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
@@ -51,9 +51,8 @@ jobs:
           uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
             cd "$1"
             python -m mutmut run --max-children 1 \
-              "build.x_qualify__mutmut_*" "build.x_package__mutmut_*" "build.x_parse_stage_manifest__mutmut_*" \
-              "build.x_archive_member_problems__mutmut_*" "build.x_extracted_library_problems__mutmut_*"
-          ' artifact-proof "$proof"
+              "build.x_audit_tools__mutmut_*" "build.x_audit_runtime__mutmut_*"
+          ' audit-proof "$proof"
           for part in meta spans; do
             gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n' | fold -w 3000 | awk -v part="$part" '{print part, $0}'
           done
@@ -69,15 +68,15 @@ jobs:
           meta = directory / "build.py.meta"
           spans = directory / "build.py.spans"
           names = load_json(meta)["exit_code_by_key"]
-          functions = ("qualify", "package", "parse_stage_manifest", "archive_member_problems",
-                       "extracted_library_problems")
+          functions = ("audit_tools", "audit_runtime")
           prefixes = tuple(f"build.x_{function}__mutmut_" for function in functions)
           pending = {name for name in names if not name.startswith(prefixes)}
           results = read_results(meta, spans, "build.", pending)
-          artifacts = {name: outcome for name, outcome in results.items() if name.startswith(prefixes)}
-          assert len(artifacts) == 621, len(artifacts)
-          print("Outcome totals:", dict(sorted(Counter(artifacts.values()).items())))
-          for name, outcome in sorted(artifacts.items()):
-              if outcome != "killed":
-                  print(outcome, name)
+          for prefix, expected in zip(prefixes, (240, 373), strict=True):
+              members = {name: outcome for name, outcome in results.items() if name.startswith(prefix)}
+              assert len(members) == expected, len(members)
+              print(prefix, dict(sorted(Counter(members.values()).items())))
+              for name, outcome in sorted(members.items()):
+                  if outcome != "killed":
+                      print(outcome, name)
           PY
