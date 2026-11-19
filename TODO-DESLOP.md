@@ -650,6 +650,23 @@ empty output. Variants 11, 14, 62, 65, 89, 92, 114, 117, 129, 132,
 diagnostic details. All 128 ordinary tests and both linters passed.
 The native repeat and wider audit scopes remain under DSLP-4.
 
+The hosted repeat at `4ec9793bad1e72117908de96d28cebbaa374c46e`
+checked 240 tools and 373 runtime-coordinator identities on Linux
+x86-64, Linux ARM64 and macOS ARM64. All three caught the same 214 tools
+identities. The runtime selection caught 276 on both Linux architectures
+and 266 on macOS. Ten path-case variants account for the difference:
+24, 26, 28, 30, 32, 34, 36, 54, 111 and 113. All other runtime
+outcomes match. The 97 shared runtime survivors remain in DSLP-4.
+Use the chunked receipt procedure from the main audit proof.
+[Native specialized audit repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44448102415)
+
+The SDK fixture now checks leaked staging and builder paths separately
+with a valid relocatable pkg-config prefix. An unrelated .pc file can
+no longer satisfy the test's check for required dependencies from the
+FFmpeg metadata. The same SDK source and spans caught 239 of 288,
+ten more than the previous selection. All 128 ordinary tests and both
+linters passed. The 49 survivors remain in DSLP-4.
+
 ## Tickets
 
 
