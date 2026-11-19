@@ -343,6 +343,15 @@
     },
     "total": 376
   },
+  "runtime-binary": {
+    "source_sha256": "d5c9806d1b5182dfca1a97b3477b9f4d8fe7fbee2633dc578c6511430865b21f",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": []
+    },
+    "total": 293
+  },
   "sdk": {
     "source_sha256": "b551dae7fe24f5cf7897c98acb3481281b3432a277e7f1320345cc1614d08db8",
     "survivors": {

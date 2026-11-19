@@ -15,6 +15,7 @@ SCOPES = {
     }),
     "audit": frozenset({"audit"}),
     "runtime": frozenset({"audit_runtime"}),
+    "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
     "sdk": frozenset({"audit_sdk"}),
     "tools": frozenset({"audit_tools"}),
 }
