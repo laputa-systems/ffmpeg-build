@@ -445,6 +445,75 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(audit_programs.call_args.args[1:],
                                      (config, stage, build.load_sources()["ffmpeg"].version))
 
+    def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
+        target = "aarch64-unknown-linux-musl"
+        profile, profile_path = build.load_profile("runtime")
+        profile = profile | {"components": {"protocols": ["file"]}}
+        config = build.target_config(profile, target)
+        toolchain = {"cc": "fixture clang", "sysroot": "/", "cpu_baseline": config["cpu_baseline"], "libc": "musl 1.2.6"}
+        build_root = pathlib.Path(self.temp.name) / "build"
+        with (
+            mock.patch.object(build, "load_profile", return_value=(profile, profile_path)),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            mock.patch.object(build, "BUILD_ROOT", build_root),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build, "platform_toolchain", return_value=toolchain),
+            mock.patch.object(build, "audit_runtime") as audit_runtime,
+        ):
+            stage, build_dir, deps = build.build_paths("runtime", target)
+            ffmpeg = build_dir / "ffmpeg"
+            config_mak = ffmpeg / "ffbuild" / "config.mak"
+            config_mak.parent.mkdir(parents=True)
+            (ffmpeg / "config.h").write_text("#define ARCH_AARCH64 1\n")
+            (ffmpeg / "config_components.h").write_text(
+                "#define CONFIG_FILE_PROTOCOL 1\n"
+                "#define CONFIG_AV1_DECODER 1\n"
+                "#define CONFIG_AV1_VAAPI_HWACCEL 1\n"
+                "#define CONFIG_H264_VAAPI_HWACCEL 1\n"
+                "#define CONFIG_HEVC_VAAPI_HWACCEL 1\n"
+                "#define CONFIG_VP9_VAAPI_HWACCEL 1\n"
+            )
+            components = {
+                "protocols": ["file"],
+                "decoders": ["av1"],
+                "hwaccels": ["av1_vaapi", "h264_vaapi", "hevc_vaapi", "vp9_vaapi"],
+            }
+            requested = components | {"hwaccels": ["h264_vaapi", "hevc_vaapi", "vp9_vaapi", "av1_vaapi"]}
+            configuration = "--disable-network"
+            config_text = (
+                f"FFMPEG_CONFIGURATION={configuration}\nCONFIG_ZLIB=yes\nCONFIG_GPL=yes\n"
+                f"CFLAGS=-fPIC -march={config['cpu_baseline']}\n"
+            )
+            manifest_file = self.write_package_stage(target, "e" * 40, "runtime")
+            manifest = json.loads(manifest_file.read_text()) | {
+                "contract": 1,
+                "components": components,
+                "auto_selected": {},
+                "external_libraries": [],
+                "bundled_dependencies": config.get("bundled_dependencies", []),
+                "frameworks": config.get("frameworks", []),
+                "system_libraries": config.get("system_libraries", []),
+                "toolchain": toolchain,
+                "configure_args": build.configure_args_for(profile, target, build_dir, deps, toolchain),
+                "configure": configuration,
+                "license": "GPL version 2 or later",
+            }
+            manifest_file.write_text(json.dumps(manifest))
+            for flags, expected in (("CONFIG_SHARED=yes\n", 0), ("", 1), ("CONFIG_SHARED=yes\nCONFIG_STATIC=yes\n", 1)):
+                with self.subTest(flags=flags), redirect_stdout(io.StringIO()) as stdout:
+                    audit_runtime.reset_mock()
+                    config_mak.write_text(config_text + flags)
+                    self.assertEqual(build.audit(target, "runtime"), expected, stdout.getvalue())
+                    self.assertEqual(
+                        [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                        ["FAIL audit: shared libraries only"] if expected else [],
+                    )
+                    audit_runtime.assert_called_once()
+                    self.assertEqual(
+                        audit_runtime.call_args.args[1:],
+                        (config, stage, build.load_sources()["ffmpeg"].version, requested, components, manifest),
+                    )
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]

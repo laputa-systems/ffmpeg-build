@@ -432,6 +432,23 @@ with `PYTHONPATH=tests:.` in the locked environment. The fixtures
 mock the native script and verify the extraction and manifest
 paths. The 118 ordinary tests, Ruff and ty passed.
 
+The runtime build-tree fixture now checks shared-only configuration
+and the runtime audit handoff. It reads the resolved file protocol,
+AV1 decoder and the four Linux VAAPI accelerators from the actual
+config header. The passed arguments include both the requested and
+the parsed lists in their own order, and the checked stage manifest.
+Disabling shared libraries or enabling static libraries each produces
+the same scoped audit failure. The native artifact trials above
+exercise the real loader and binaries.
+
+At `a9ebce0aed380a8201ad5482c7b94f76864e8f89`, the same 696
+`audit` identities moved from 386 to 437 caught with no other outcome
+changes. Use Python 3.15.2, mutmut 3.8.1 and pytest 9.2.0 with the
+same archive recipe above. Select
+`tests/test_build.py -k 'inconsistent_build_tree or audit_runtime_checks_shared_configuration'`
+and `build.x_audit__mutmut_*`. The remaining 259 survivors stay in
+DSLP-4. All 119 ordinary tests, Ruff and ty passed.
+
 ## Tickets
 
 
