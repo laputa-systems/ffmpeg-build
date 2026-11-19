@@ -78,15 +78,6 @@ jobs:
           touch "$proof/.work/cache/sources/.keep"
           export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
           git archive HEAD | tar -x -C "$proof"
-          cat >> "$proof/pyproject.toml" <<'TOML'
-
-          [tool.mutmut]
-          source_paths = ["build.py"]
-          also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles",
-                       ".work/cache/sources", ".github/scripts", "patches", "scripts", "Makefile"]
-          pytest_add_cli_args_test_selection = ["tests/test_build.py"]
-          use_setproctitle = false
-          TOML
           uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
             cd "$1"
             python .github/scripts/verify_mutation_scope.py "$2" "$3" "$4"

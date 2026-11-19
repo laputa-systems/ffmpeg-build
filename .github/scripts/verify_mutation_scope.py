@@ -8,7 +8,7 @@ from collections import Counter
 from importlib import import_module
 from pathlib import Path
 
-from select_mutation_scopes import SCOPES, module_shape
+from select_mutation_scopes import SCOPES, module_shape, scope_source
 
 
 def main() -> None:
@@ -21,16 +21,32 @@ def main() -> None:
     gate = import_module("mutants_gate")
 
     members = SCOPES[args.scope]
-    prefixes = tuple(f"build.x_{name}__mutmut_" for name in sorted(members))
+    source = Path(scope_source(args.scope))
+    module = f"{source.stem}."
+    prefixes = tuple(f"{module}x_{name}__mutmut_" for name in sorted(members))
+    pyproject = Path("pyproject.toml")
+    also_copy = ["tests", "sources.lock.json", ".work/cache/sources"]
+    tests = "tests/test_bootstrap.py"
+    if args.scope == "bootstrap":
+        subprocess.run([sys.executable, "-c", "import bootstrap"], check=True)
+    else:
+        also_copy.extend(("bootstrap.py", "profiles", ".github/scripts", "patches", "scripts", "Makefile"))
+        tests = "tests/test_build.py"
+    with pyproject.open("a", encoding="utf-8") as config:
+        config.write(
+            f"\n[tool.mutmut]\nsource_paths = {json.dumps([str(source)])}\n"
+            f"also_copy = {json.dumps(also_copy)}\n"
+            f"pytest_add_cli_args_test_selection = {json.dumps([tests])}\nuse_setproctitle = false\n"
+        )
     subprocess.run(
         [sys.executable, "-m", "mutmut", "run", "--max-children", "1",
          *(f"{prefix}*" for prefix in prefixes)],
         check=True,
     )
 
-    source, generated, metadata, spans = map(
-        Path, ("build.py", "mutants/build.py", "mutants/build.py.meta", "mutants/build.py.spans"),
-    )
+    generated = Path("mutants") / source
+    metadata = generated.with_suffix(".py.meta")
+    spans = generated.with_suffix(".py.spans")
     root = Path.cwd().resolve(strict=True)
     for path in (source, generated, metadata, spans):
         if not path.is_file() or path.resolve() != root / path:
@@ -41,12 +57,12 @@ def main() -> None:
     selected = {name for name in keys if name.startswith(prefixes)}
     if len(selected) != receipt["total"]:
         raise ValueError(f"{args.scope}: found {len(selected)} mutations, expected {receipt['total']}")
-    outcomes = gate.read_results(metadata, spans, "build.", keys - selected)
+    outcomes = gate.read_results(metadata, spans, module, keys - selected)
     _, functions = module_shape(source.read_bytes())
     scoped_source = Path(".work/tmp/scoped-source")
     scoped_source.write_text(json.dumps({name: functions[name] for name in members}, sort_keys=True), encoding="utf-8")
     qualified = gate.qualified_survivors(
-        scoped_source, generated, spans, "build.",
+        scoped_source, generated, spans, module,
         {"source_sha256": receipt["source_sha256"], "survivors": receipt["survivors"][args.runner]},
     )
     counts = Counter(outcomes[name] for name in selected)

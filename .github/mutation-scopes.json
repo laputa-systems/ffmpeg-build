@@ -210,6 +210,18 @@
     },
     "total": 696
   },
+  "bootstrap": {
+    "source_sha256": "913acf711e707d6aca4e20a3e32ecaf173a4b9252210062916e556fc3cfc5a00",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": [
+        "bootstrap.x__wheel__mutmut_5=bf4827a65b288b2e1d4a73ca20136b522f2faf34add01755a8a2e82fd7da8b6a",
+        "bootstrap.x__wheel__mutmut_62=dc7bcbaf1052c43b8a9ee1c57af469c823be1c78bc9811c6645ebeb138f3270c"
+      ]
+    },
+    "total": 75
+  },
   "runtime": {
     "source_sha256": "e8da96df97e5985fe9812ca7a8801f36816a071c530948c371141bfce08e0bb4",
     "survivors": {

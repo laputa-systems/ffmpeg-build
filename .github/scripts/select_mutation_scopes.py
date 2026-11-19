@@ -14,6 +14,7 @@ SCOPES = {
         "archive_member_problems", "extracted_library_problems", "package", "parse_stage_manifest", "qualify",
     }),
     "audit": frozenset({"audit"}),
+    "bootstrap": frozenset({"_digest", "_wheel"}),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
     "sdk": frozenset({"audit_sdk"}),
@@ -24,6 +25,11 @@ CONFIGURATION = frozenset({
     ".gitattributes", ".gitignore", "Makefile", "pyproject.toml", "sources.lock.json", "uv.lock",
 })
 INPUT_DIRECTORIES = (".github/", "patches/", "profiles/", "scripts/", "tests/")
+
+
+
+def scope_source(scope: str) -> str:
+    return "bootstrap.py" if scope == "bootstrap" else "build.py"
 
 
 def module_shape(source: bytes) -> tuple[list[str], dict[str, str]]:
@@ -40,25 +46,26 @@ def module_shape(source: bytes) -> tuple[list[str], dict[str, str]]:
     return layout, functions
 
 
-def changed_scopes(before: bytes, after: bytes) -> set[str]:
+def changed_scopes(path: str, before: bytes, after: bytes) -> set[str]:
     old_layout, old_functions = module_shape(before)
     new_layout, new_functions = module_shape(after)
     if old_layout != new_layout:
-        raise ValueError("module-level build.py changes need mutation qualification")
+        raise ValueError(f"module-level {path} changes need mutation qualification")
     changed = {name for name in old_functions if old_functions[name] != new_functions[name]}
-    unqualified = changed - set().union(*SCOPES.values())
+    eligible = {scope: names for scope, names in SCOPES.items() if scope_source(scope) == path}
+    unqualified = changed - set().union(*eligible.values())
     if unqualified:
         raise ValueError(f"build functions need mutation qualification: {sorted(unqualified)}")
-    return {scope for scope, members in SCOPES.items() if members & changed}
+    return {scope for scope, members in eligible.items() if members & changed}
 
 
-def select(changes: Mapping[str, str], before: bytes, after: bytes) -> list[str]:
+def select(changes: Mapping[str, str], sources: Mapping[str, tuple[bytes, bytes]]) -> list[str]:
     selected: set[str] = set()
     for path, status in changes.items():
         if status not in {"A", "D", "M"}:
             raise ValueError(f"unsupported change status {status}: {path}")
-        if path == "build.py" and status == "M":
-            selected.update(changed_scopes(before, after))
+        if path in sources:
+            selected.update(changed_scopes(path, *sources[path]))
         elif path in CONFIGURATION or path.startswith(INPUT_DIRECTORIES):
             selected.update(SCOPES)
         elif not path.endswith(".md"):
@@ -80,11 +87,15 @@ def main() -> None:
     common = subprocess.check_output(["git", "merge-base", base, "HEAD"], text=True).strip()
     diff = subprocess.check_output(["git", "diff", "--name-status", "-M", "-z", common, "HEAD"])
     changes = parse_changes(diff)
-    before = after = b""
-    if changes.get("build.py") == "M":
-        before = subprocess.check_output(["git", "show", f"{common}:build.py"])
-        after = subprocess.check_output(["git", "show", "HEAD:build.py"])
-    print(json.dumps(select(changes, before, after)))
+    sources = {
+        path: (
+            subprocess.check_output(["git", "show", f"{common}:{path}"]),
+            subprocess.check_output(["git", "show", f"HEAD:{path}"]),
+        )
+        for path in {scope_source(scope) for scope in SCOPES}
+        if changes.get(path) == "M"
+    }
+    print(json.dumps(select(changes, sources)))
 
 
 if __name__ == "__main__":
