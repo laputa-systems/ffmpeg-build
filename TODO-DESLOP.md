@@ -710,6 +710,34 @@ The matched local selection catches 329 of 376 identities, 13 more
 than the preceding fixture. All 130 ordinary tests and both linters
 passed. Native runtime repetition remains in DSLP-4.
 
+
+**Build and stamp admission**
+
+The tools build fixture stages the compiler outputs in a real
+temporary tree, checks patch, configure, compile and install
+arguments at the subprocess boundary, and executes normal pruning
+and stage admission. An incomplete stage writes no stamp. A retry
+replaces that stage, publishes the receipt with the locked inputs,
+and the next unchanged call reuses it without fetching.
+
+With mutmut 3.8.1 and pytest 9.2.0, the same 336 `build.x_build`
+identities move from 46 to 230 caught on macOS ARM64. Reuse the
+`build.py` archive recipe with only `tests/test_build.py` and select
+`build.x_build__mutmut_*`. All identities ran. The other 106 remain in
+DSLP-4, including dependency and runtime-stage branches outside
+this tools fixture.
+
+
+The build fixture also runs the real stage shaping for Linux and macOS
+runtime and the macOS playback SDK. It verifies runtime symlinks,
+role-specific Linux linker responses, configuration and manifest
+handoffs, and removal of static link flags only from runtime pkg-config
+files. A matching stamp over an incomplete stage still triggers rebuild.
+
+The same 336 build identities now catch 317 on macOS ARM64.
+The 19 remaining outcomes include case-only names, parsed stamp
+formatting, and diagnostics. Native confirmation remains in DSLP-4.
+
 ## Tickets
 
 

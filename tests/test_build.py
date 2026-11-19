@@ -239,6 +239,184 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(manifest.read_bytes(), original)
                     self.assertEqual(stamp.read_bytes(), content)
 
+    def test_build_publishes_stamp_only_for_complete_stage(self):
+        for profile_name, target in (
+            ("tools", "x86_64-unknown-linux-musl"),
+            ("runtime", "x86_64-unknown-linux-musl"),
+            ("runtime", "aarch64-apple-darwin"),
+            ("play-sdk", "aarch64-apple-darwin"),
+        ):
+            with self.subTest(profile=profile_name, target=target):
+                self.check_build_stage(profile_name, target)
+
+    def check_build_stage(self, profile_name, target):
+        lock = build.load_sources()
+        profile, profile_path = build.load_profile(profile_name)
+        config = build.target_config(profile, target)
+        artifact = profile["artifact"]
+        build_root = pathlib.Path(self.temp.name) / "build"
+        build_dir = build_root / target / profile_name
+        stage = self.stage / target / profile_name
+        deps = stage if artifact == "sdk" else build_dir / "deps"
+        ffmpeg_build = build_dir / "ffmpeg"
+        source_root = build_dir / "src"
+        install_root = build_dir / "install"
+        build_tmp = pathlib.Path(self.temp.name) / target / profile_name / "tmp"
+        manifest = stage / "share/ffmpeg-build/manifest.json"
+        stamp = build_dir / "stamp.json"
+        arguments = ["--disable-network"]
+        toolchain = {"compiler": "fixture"}
+        compile_env = {"FIXTURE": "compiler"}
+        complete = False
+
+        def extract(source, destination):
+            self.assertEqual(destination, source_root)
+            path = destination / source.name
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def command(args, *, cwd, env=None):
+            if args == ["make", "install", f"DESTDIR={install_root}"]:
+                payload = install_root / build.INSTALL_PREFIX.lstrip("/")
+                files = ["bin/ffmpeg", "include/temporary.h"]
+                if artifact != "tools":
+                    files.append("bin/ffplay")
+                if complete:
+                    files.extend(("bin/ffprobe", "include/libavutil/ffversion.h"))
+                libraries = ()
+                if artifact == "runtime":
+                    libraries = build.RUNTIME_LIBRARIES
+                    suffix = ".dylib" if config["platform"] == "macos" else ".so"
+                    files.extend(f"lib/{name}{suffix}" for name in libraries if name != "libavcodec")
+                    files.append(f"lib/libavcodec-fixture{suffix}")
+                elif artifact == "sdk":
+                    libraries = ("libavcodec", "libavformat", "libavfilter", "libavutil", "libswresample", "libswscale", "dav1d", "zlib")
+                    files.extend(f"lib/{name}.a" for name in libraries[:6])
+                    files.extend(("lib/libdav1d.a", "lib/libz.a", "include/dav1d/dav1d.h", "include/zlib.h"))
+                for relative in files:
+                    path = payload / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"fixture")
+                if artifact == "runtime":
+                    (payload / "lib" / f"libavcodec{suffix}").symlink_to(f"libavcodec-fixture{suffix}")
+                for library in libraries:
+                    path = payload / "lib" / "pkgconfig" / f"{library}.pc"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("prefix=/opt/ffmpeg-build\nLibs.private: -ldav1d\n", encoding="utf-8")
+
+        def notices(profile_arg, target_arg, sources, staging):
+            self.assertEqual((profile_arg, target_arg, staging), (profile, target, stage))
+            self.assertEqual(sources, {name: source_root / name for name in profile["sources"]})
+            for relative in build.notice_paths(profile):
+                path = staging / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture notice", encoding="utf-8")
+
+        ffmpeg_source = source_root / "ffmpeg"
+        dep_builders = {name: mock.Mock() for name in ("dav1d", "zlib")}
+        calls = [
+            mock.call(["patch", "-p1", "-i", build.ROOT / "patches/ffmpeg-owned-help.patch"], cwd=ffmpeg_source),
+            mock.call([str(ffmpeg_source / "configure"), *arguments], cwd=ffmpeg_build, env=compile_env),
+            mock.call(["make", "-j2"], cwd=ffmpeg_build, env=compile_env),
+            mock.call(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=compile_env),
+        ]
+        with (
+            mock.patch.multiple(
+                build, BUILD_ROOT=build_root, STAGE_ROOT=self.stage, TMP_ROOT=build_tmp,
+                DEPENDENCY_BUILDERS=dep_builders,
+                require_native_host=mock.DEFAULT, platform_toolchain=mock.DEFAULT,
+                configure_args_for=mock.DEFAULT, fetch_profile_sources=mock.DEFAULT, extract_source=mock.DEFAULT,
+                dep_env=mock.DEFAULT, ffmpeg_env=mock.DEFAULT, run=mock.DEFAULT, jobs=mock.DEFAULT,
+                install_notices=mock.DEFAULT, finish_programs=mock.DEFAULT, sign_libraries=mock.DEFAULT,
+                manifest_for=mock.DEFAULT,
+            ) as patched,
+            redirect_stdout(io.StringIO()),
+        ):
+            for name, value in (
+                ("platform_toolchain", toolchain), ("configure_args_for", arguments),
+                ("dep_env", compile_env), ("ffmpeg_env", compile_env), ("jobs", 2),
+                ("manifest_for", {"profile": profile_name, "target": target}),
+            ):
+                patched[name].return_value = value
+            patched["extract_source"].side_effect = extract
+            patched["run"].side_effect = command
+            patched["install_notices"].side_effect = notices
+
+            with self.assertRaisesRegex(SystemExit, "stage is incomplete after build"):
+                build.build(target, profile_name)
+            self.assertFalse(stamp.exists())
+            self.assertTrue(build_tmp.is_dir())
+            self.assertEqual(patched["run"].call_args_list, calls)
+            fingerprint = build.build_fingerprint(profile_path, target, profile_name, arguments, toolchain)
+            stamp.write_text(json.dumps({"fingerprint": fingerprint}))
+
+            old = stage / "old"
+            old.touch()
+            complete = True
+            patched["run"].reset_mock()
+            patched["ffmpeg_env"].reset_mock()
+            patched["finish_programs"].reset_mock()
+            patched["sign_libraries"].reset_mock()
+            build.build(target, profile_name)
+            self.assertFalse(old.exists())
+            self.assertFalse(install_root.exists())
+            if artifact == "tools":
+                self.assertFalse((stage / "include").exists())
+                self.assertFalse((stage / "lib").exists())
+            expected_programs = [] if artifact == "sdk" else ["ffmpeg", "ffprobe"]
+            self.assertEqual(sorted(item.name for item in (stage / "bin").glob("*")), expected_programs)
+            if artifact != "tools":
+                static = " -ldav1d" if artifact == "sdk" else ""
+                self.assertEqual(
+                    (stage / "lib/pkgconfig/libavcodec.pc").read_text(),
+                    "prefix=${pcfiledir}/../..\nLibs.private:" + static + "\n",
+                )
+            if artifact == "runtime":
+                suffix = ".dylib" if config["platform"] == "macos" else ".so"
+                library = stage / "lib" / f"libavcodec{suffix}"
+                self.assertTrue(library.is_symlink())
+                self.assertEqual(library.readlink(), pathlib.Path(f"libavcodec-fixture{suffix}"))
+            for role, filename in build.LINKER_RESPONSE_FILES.items():
+                response = build_dir / filename
+                if artifact == "runtime" and config["platform"] == "linux":
+                    self.assertEqual(response.read_text(), build.linker_response(build.RUNTIME_SEARCH_PATHS["linux"][role]))
+                else:
+                    self.assertFalse(response.exists())
+            self.assertEqual(json.loads(manifest.read_text()), {"profile": profile_name, "target": target})
+            self.assertEqual(patched["run"].call_args_list, calls)
+            if artifact == "sdk":
+                patched["finish_programs"].assert_not_called()
+            else:
+                patched["finish_programs"].assert_called_once_with(config, stage)
+            if artifact == "runtime":
+                patched["sign_libraries"].assert_called_once_with(config, stage)
+            else:
+                patched["sign_libraries"].assert_not_called()
+            patched["platform_toolchain"].assert_called_with(config)
+            patched["require_native_host"].assert_called_with(config, target)
+            patched["configure_args_for"].assert_called_with(profile, target, build_dir, deps, toolchain)
+            patched["dep_env"].assert_called_with(config, deps, toolchain)
+            self.assertEqual(patched["ffmpeg_env"].call_args_list, [mock.call(config, deps)] * 3)
+            patched["fetch_profile_sources"].assert_called_with(profile, lock)
+            patched["manifest_for"].assert_called_with(profile, target, ffmpeg_build, stage, arguments, toolchain)
+            self.assertEqual((ffmpeg_source / "VERSION").read_text(), lock["ffmpeg"].version + "\n")
+            for name, builder in dep_builders.items():
+                builder.assert_called_with(lock[name], source_root / name, build_dir / name, deps, compile_env, config)
+            self.assertEqual(json.loads(stamp.read_text()), {
+                "fingerprint": fingerprint,
+                "target": target,
+                "profile": profile_name,
+                "sources": {name: {"version": lock[name].version, "sha256": lock[name].sha256}
+                            for name in profile["sources"]},
+                "profile_sha256": hashing.sha256_file(profile_path),
+                "build_py_sha256": hashing.sha256_file(build.ROOT / "build.py"),
+                "flags": arguments,
+                "toolchain": toolchain,
+            })
+            patched["fetch_profile_sources"].reset_mock()
+            build.build(target, profile_name)
+            patched["fetch_profile_sources"].assert_not_called()
+
     def test_package_writes_archive_and_release_manifest(self):
         commit = "e" * 40
         target = "aarch64-apple-darwin"
