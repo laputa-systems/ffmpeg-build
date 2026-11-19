@@ -1,4 +1,4 @@
-name: native tools and runtime audit mutation census
+name: native SDK, tools and runtime audit mutation census
 
 on: pull_request
 
@@ -25,14 +25,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: laputa-systems/buildlib
-          ref: 1497970d9454a6a9875b1f201cbaad71fd92a010
+          ref: 6b2f4deb0a9afe024665863b6dd629fcfbd3c918
           path: .work/buildlib
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           version: 0.13.7
       - run: uv python install 3.15.2
-      - name: Measure and account for tools and runtime audit identities
+      - name: Measure and account for SDK, tools and runtime audit identities
         run: |
           proof="$PWD/.work/tmp/audit-proof"
           mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
@@ -51,7 +51,7 @@ jobs:
           uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
             cd "$1"
             python -m mutmut run --max-children 1 \
-              "build.x_audit_tools__mutmut_*" "build.x_audit_runtime__mutmut_*"
+              "build.x_audit_sdk__mutmut_*" "build.x_audit_tools__mutmut_*" "build.x_audit_runtime__mutmut_*"
           ' audit-proof "$proof"
           for part in meta spans; do
             gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n' | fold -w 3000 | awk -v part="$part" '{print part, $0}'
@@ -68,11 +68,11 @@ jobs:
           meta = directory / "build.py.meta"
           spans = directory / "build.py.spans"
           names = load_json(meta)["exit_code_by_key"]
-          functions = ("audit_tools", "audit_runtime")
+          functions = ("audit_sdk", "audit_tools", "audit_runtime")
           prefixes = tuple(f"build.x_{function}__mutmut_" for function in functions)
           pending = {name for name in names if not name.startswith(prefixes)}
           results = read_results(meta, spans, "build.", pending)
-          for prefix, expected in zip(prefixes, (240, 373), strict=True):
+          for prefix, expected in zip(prefixes, (288, 240, 376), strict=True):
               members = {name: outcome for name, outcome in results.items() if name.startswith(prefix)}
               assert len(members) == expected, len(members)
               print(prefix, dict(sorted(Counter(members.values()).items())))
