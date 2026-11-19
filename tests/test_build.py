@@ -58,7 +58,15 @@ class ProfileTests(unittest.TestCase):
                         path.write_bytes(raw)
                         build.load_profile("tools")
                 path.write_text(json.dumps(valid, ensure_ascii=False), encoding="utf-8")
-                parsed, origin = build.load_profile("tools")
+                read_text = pathlib.Path.read_text
+
+                def read_profile(source, encoding=None, **options):
+                    if source == path and encoding is None:
+                        encoding = "ascii"
+                    return read_text(source, encoding=encoding, **options)
+
+                with mock.patch.object(pathlib.Path, "read_text", new=read_profile):
+                    parsed, origin = build.load_profile("tools")
                 self.assertEqual((parsed, origin), (valid, path))
                 target = "x86_64-unknown-linux-musl"
                 self.assertEqual(build.target_config(parsed, target), {"arch": "x86_64", "platform": "linux"})
