@@ -1,4 +1,4 @@
-name: FFmpeg whole-change mutation trial
+name: FFmpeg controller mutation
 
 on: pull_request
 
@@ -44,12 +44,14 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           scopes=$(uv run --frozen --python 3.15.2 python .github/scripts/select_mutation_scopes.py "$BASE" .work/buildlib/scripts)
+          if [ "$scopes" = '[]' ]; then
+            scopes='["documentation"]'
+          fi
           printf 'scopes=%s\n' "$scopes" >> "$GITHUB_OUTPUT"
           printf 'Selected scopes %s\n' "$scopes"
 
   native:
     needs: plan
-    if: needs.plan.outputs.scopes != '[]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -61,6 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -73,9 +76,9 @@ jobs:
           version: 0.13.7
       - name: Measure selected mutations in the committed archive
         env:
+          BASE: ${{ github.event.pull_request.base.sha }}
           SCOPE: ${{ matrix.scope }}
-          NATIVE_RUNNER: ${{ matrix.runner }}
-        run: scripts/run-mutation-scope.sh "$SCOPE" "$NATIVE_RUNNER" "$PWD/.work/buildlib/scripts"
+        run: make mutants-diff MUTATION_BASE="$BASE" MUTATION_SCOPE="$SCOPE" MUTATION_BUILDLIB=.work/buildlib
 
   whole-change:
     if: always()
@@ -85,12 +88,7 @@ jobs:
     env:
       PLAN: ${{ needs.plan.result }}
       NATIVE: ${{ needs.native.result }}
-      SCOPES: ${{ needs.plan.outputs.scopes }}
     steps:
       - run: |
           test "$PLAN" = success
-          if [ "$SCOPES" = '[]' ]; then
-            test "$NATIVE" = skipped
-          else
-            test "$NATIVE" = success
-          fi
+          test "$NATIVE" = success

@@ -115,6 +115,7 @@ def select(changes: Mapping[str, str], sources: Mapping[str, tuple[bytes, bytes]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lines", action="store_true")
+    parser.add_argument("--scope", choices=["", "documentation", *sorted(SCOPES)], default="")
     parser.add_argument("base")
     parser.add_argument("buildlib_scripts", type=Path)
     args = parser.parse_args()
@@ -136,6 +137,13 @@ def main() -> None:
         if changes.get(path) == "M"
     }
     scopes = select(changes, sources)
+    if args.scope == "documentation":
+        if scopes:
+            raise ValueError(f"documentation job still has selected scopes: {scopes}")
+    elif args.scope:
+        if args.scope not in scopes:
+            raise ValueError(f"mutation scope {args.scope} does not cover this change")
+        scopes = [args.scope]
     if args.lines:
         for scope in scopes:
             print(scope)

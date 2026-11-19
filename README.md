@@ -48,5 +48,6 @@ Releases publish one `ffmpeg-<profile>-<version>-<target>.tar.xz` and `.manifest
 on the current native host (Linux x86-64, Linux ARM64, or macOS ARM64). Fetch the
 base branch and the pinned Buildlib revision before running it. Set
 `MUTATION_BASE` to compare with another revision and `MUTATION_BUILDLIB` to use
-a different local Buildlib checkout. The hosted gate runs the same selected
-scopes on all three hosts.
+a different local Buildlib checkout. Set `MUTATION_SCOPE` to rerun one scope
+selected for the change. The hosted gate runs the same target on all three
+hosts.
