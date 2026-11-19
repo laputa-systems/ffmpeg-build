@@ -21,6 +21,7 @@ SCOPES = {
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
     "sdk": frozenset({"audit_sdk"}),
+    "stage-admission": frozenset({"mismatched_source_pins", "parse_archive_name", "read_manifest", "stage_complete"}),
     "tools": frozenset({"audit_tools"}),
 }
 

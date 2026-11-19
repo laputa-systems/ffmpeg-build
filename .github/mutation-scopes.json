@@ -578,6 +578,50 @@
     },
     "total": 288
   },
+  "stage-admission": {
+    "source_sha256": "cff70b937b6a324dc3e8e7483f2772b2d6ce2f7db2c88920bf5fee5c9037cc36",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_parse_archive_name__mutmut_4=70ed0ab5d063e01ca7fbae01d6c02640eff737f70b9cfea875bc1e8231e91aad",
+        "build.x_read_manifest__mutmut_13=095b0f69ab8bee1a2a9c57c683145cb56386388f287ada6a9cd1e5572ae6c7bb",
+        "build.x_read_manifest__mutmut_24=287f3dbee1b4cb0847276eda6b1e01cf48729182db2d21047df5b76055fc82e1"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_parse_archive_name__mutmut_4=70ed0ab5d063e01ca7fbae01d6c02640eff737f70b9cfea875bc1e8231e91aad",
+        "build.x_read_manifest__mutmut_13=095b0f69ab8bee1a2a9c57c683145cb56386388f287ada6a9cd1e5572ae6c7bb",
+        "build.x_read_manifest__mutmut_24=287f3dbee1b4cb0847276eda6b1e01cf48729182db2d21047df5b76055fc82e1"
+      ],
+      "xcode-27": [
+        "build.x_parse_archive_name__mutmut_4=70ed0ab5d063e01ca7fbae01d6c02640eff737f70b9cfea875bc1e8231e91aad",
+        "build.x_read_manifest__mutmut_13=095b0f69ab8bee1a2a9c57c683145cb56386388f287ada6a9cd1e5572ae6c7bb",
+        "build.x_read_manifest__mutmut_24=287f3dbee1b4cb0847276eda6b1e01cf48729182db2d21047df5b76055fc82e1",
+        "build.x_stage_complete__mutmut_14=931094960cd19754ee6e6fb2f34d8d384bb15fb551a9c3d956e84f22fc1c4163",
+        "build.x_stage_complete__mutmut_22=4bfca1cc68c725ebb7fad1c05d3c3cfc7c45facf7b947cae3c36660906595d4b",
+        "build.x_stage_complete__mutmut_28=9315d47eab3184e40cfa671aac0580a9292ad0cf3d8f7f6241b37ce2afb7d161",
+        "build.x_stage_complete__mutmut_33=de4b18a5e5de663b1de860670576f5f679f27e433c60e869cdab9d4f7c81e423",
+        "build.x_stage_complete__mutmut_35=4cfc44627df3d6f1aa47b853176a1152015ee6dde91d726442350c0ddbf5ccd5",
+        "build.x_stage_complete__mutmut_37=5ca74446c11508e3c637f3198dec1c42167992db9137b5ee1a90c26c8c658cbb",
+        "build.x_stage_complete__mutmut_39=527cd9a7936ed442a6416e3bf058fb993c40221df5633aff2d1524f9bbd6c42a",
+        "build.x_stage_complete__mutmut_41=e0dff3a044332edaa67a96b2431b2706318bc4a01b567b293a8a69b461af75f5",
+        "build.x_stage_complete__mutmut_43=0dcbe195fa2997a916a18831ac2a8c41e544cbb7e453475aa6e7f3bfe6aca6a2",
+        "build.x_stage_complete__mutmut_45=9ab6340089fcd0dc370cefe4ede0b585dd283476c0e0f313912c81ebec0ba984",
+        "build.x_stage_complete__mutmut_47=8fdee39ff29e5df43835b01d774366ec5836737648c0d4bf5e0d4d7625935143",
+        "build.x_stage_complete__mutmut_49=1dab8a8a6ac9095307a8cd45afc70851241cc12074b072a618d2ddb6e807c0c8",
+        "build.x_stage_complete__mutmut_51=0068c1fc1751d56ac8ea6b5bf7b59afd88c6bd99f0b79cff3989c913c23010f5",
+        "build.x_stage_complete__mutmut_53=4ab32ffbf2e24dec6940061da5858dffe45b17ff705bd263e3c26e00cb65216a",
+        "build.x_stage_complete__mutmut_55=df9ab2888553e818c268984e9b0e526c16021a251955b66da407032253c96ebd",
+        "build.x_stage_complete__mutmut_57=10637346ca7414661939fc6be5e9f1469e2b22f2add112b7a9d1c1a5322fde35",
+        "build.x_stage_complete__mutmut_59=be0392fda63d4b56c317d28718b292e420d12bc1c8aa9d4d7117d5c0342c0058",
+        "build.x_stage_complete__mutmut_61=c91468c938951a78099e6013d534385999ff51890bea63e4e6e011c0afde4b08",
+        "build.x_stage_complete__mutmut_63=1b4403df4740277b3a1ad96dc2b65e0a1dbd15759ac1f8218c4a7d398fcf3b82",
+        "build.x_stage_complete__mutmut_65=f52bd66eb203b70afbd5d2e59dba03b4a9a9db9f9b10527cd94ea70584a96bb3",
+        "build.x_stage_complete__mutmut_67=64acf28af624c859755b22b48ebf0a516b817ce9b45ff81679205abfda2d22c7",
+        "build.x_stage_complete__mutmut_69=797bb461436f55737ecb911ebec13b636a75bce751cc793bc2a25575e5dacb30",
+        "build.x_stage_complete__mutmut_71=94914228e62e86374cc26fcddb1445d1f6a189a84fde3e8747f973a82fac07c7"
+      ]
+    },
+    "total": 133
+  },
   "tools": {
     "source_sha256": "f48f6e95a039c4a1a4854169456bd717592922dcd9305d5f2a2c018065569e77",
     "survivors": {
