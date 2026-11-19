@@ -992,11 +992,7 @@ with the same six reviewed survivors. Use the sealed controller
 tests `-k inconsistent_build_tree` and `-k manifest`. The
 whole ordinary suite and both linters passed.
 
-## Tickets
-
-
-
-
+**Bootstrap cache trial**
 
 Bootstrap cache mutation at base `644c6ff72533b2a955d2116aa8d51583e7faabed`
 selected the same 75 `_wheel` and `_digest` identities in fresh before and
@@ -1007,13 +1003,12 @@ local-byte transport fixture exercises cache miss, hit, replacement, bad
 bytes, and transport failure. Reversing the staged digest comparison in a
 separate archive made the download test fail on the valid fixture.
 
-Five outcomes remain unresolved: `_wheel` IDs 5 and 62 change the case of
+Five variants survived this trial. `_wheel` IDs 5 and 62 change the case of
 `sources.lock.json` and `.part`; this volume resolves those spellings to the
 same files, so a case-sensitive run is needed. IDs 8, 16 and 20 surround the
 three malformed-lock diagnostics with `XX`; the tests check the diagnostic
-substring, not exact spelling. These are diagnostic-only survivors, not
-claims of equivalence. Native builds, actual network downloads in these tests,
-and the wider DSLP-4 mutation scope remain open.
+substring. These variants affect diagnostic wording. The final native lane
+above holds the current outcome dispositions.
 
 To reproduce, make two fresh directories under `.work/tmp` and unpack
 `git archive 644c6ff72533b2a955d2116aa8d51583e7faabed` into each. Copy this
@@ -1036,3 +1031,61 @@ each archive, set `TMPDIR` to the worktree's `.work/tmp` and run
 `timeout 120 cpu-guard --cores 2 -- <worktree>/.work/venv/bin/python -m mutmut run --max-children 1 '*x__wheel__mutmut_*' '*x__digest__mutmut_*'`.
 Compare the keys and `exit_code_by_key` values in `mutants/bootstrap.py.meta`;
 the command's success alone does not classify survivors.
+
+**Check-up**
+
+The November 18 check-up used a fresh clone of default revision
+`e01caf9a69a977dabfe7f371221a77a4f4147c34` on macOS ARM64.
+All five pass tickets and the stale source-pin finding are
+closed. The cumulative review also closed the empty-manifest
+finding. No deslop tickets remain.
+
+| Measurement | Ground | Check-up |
+| --- | --- | --- |
+| Controller tests | 73 | 168 |
+| Controller test wall time | 0.41 s fresh, 0.28 s warm | 6.58 s fresh, 5.52 s median over three warm runs |
+| Lint wall time | 0.57 s first, 0.12 s warm | 0.74 s after test setup |
+| First-party Python lines, including release and gate scripts | 2,333 | 2,693 |
+| Python test lines | 944 | 3,987 |
+| First-party typing escape-hatch occurrences | 3 | 3 |
+
+`make coverage` covered 1,458 of 1,526 statements and 612 of
+630 branches in the controller, bootstrap and collector.
+Including the gate scripts gives 1,510 of 1,679 statements
+and 631 of 680 branches. The controller suite stays within
+its 30-second growth allowance. The earlier paired test
+series above constrains the test-cost comparison. This
+check-up covers controller cost and consumption of sealed fixtures.
+The earlier native release jobs cover package builds and SDK,
+runtime and tool consumers. This check-up did not publish a release.
+
+The exact boundary control changed `if not manifest:` to
+`if False and not manifest:` in `parse_stage_manifest`. Running
+`uv run --frozen python -m unittest discover -s tests -p test_build.py -k inconsistent_build_tree`
+failed because audit returned zero instead of one. The test
+passed again after restoring the guard. The independent
+cumulative reviewer examined the controller, test and gate
+diffs through the dead-code candidate. The parent verified
+the subsequent cache and manifest changes, including a real
+case-only Git rename that expanded to all 22 scopes.
+
+The final native repeat passed all 66 trial jobs, three
+preparation jobs, the planner and the final check. Its 539
+wall seconds included 5,125 aggregate native runner seconds.
+The profile-resolution scopes caught all 130 variants per
+platform. The artifact scope caught 623 of 625 variants on
+each Linux architecture and 619 on macOS. Both ordinary PR
+checks and both default checks passed. Fleet lint passed
+`gha-test-workflow`, `coverage-target`, `strict-profile`
+and `mutation-lane` against the synced default checkout.
+[Native repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44474704358)
+
+The case-sensitive replay guidance now covers path aliases
+observed here and in CMake. The mutation cache restores packages
+using the project lock and passes a single verified Buildlib
+wheel to the native shards. Restore and artifact receipt were
+observed on each of the three platforms.
+[Skill change](https://github.com/joshuarli/usr/pull/43) ·
+[Cache change](https://github.com/laputa-systems/ffmpeg-build/pull/75)
+
+## Tickets
