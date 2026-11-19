@@ -42,3 +42,11 @@ Targets are `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, and `aarch64-un
 `runtime` is the union of the other two profiles built once as shared libraries: `ffmpeg`, `ffprobe`, and libav* that find each other through `$ORIGIN` or `@loader_path`, with dav1d and zlib linked in, GPL, and no network protocols or `ffplay`; the virtual `lavfi` input is its only device. `play-sdk` is a static playback SDK with no programs, encoders, muxers, devices, or network protocols. `tools` is the static, headless, GPL `ffmpeg`/`ffprobe` pair, with no network protocols or `ffplay`, and `lavfi` as its only device. `play-sdk` stays LGPL. The `fixtures` profile is test-only, GPL, and Linux `x86_64` only: static `ffmpeg`/`ffprobe` with the six external encoders Play's fixture generator needs. It is released only as the `ffmpeg-fixtures-<version>-x86_64-unknown-linux-musl.tar.xz` archive for generating test data, is not a runtime, and `build.py` rejects any other target. See `docs/runtime.md`, `docs/play-sdk.md`, `docs/tools-profile.md`, `docs/fixtures.md`, `docs/artifacts.md`, and `docs/release.md`.
 
 Releases publish one `ffmpeg-<profile>-<version>-<target>.tar.xz` and `.manifest.json` per profile and target, tagged `release-<commit>` (see `docs/release.md`). Lint: `make lint`. Tests: `make test` or `python3 -m unittest discover -s tests`. Fixtures for the workflow tests come from `tests/fixtures/gen.sh .work/fixtures`, which needs a full host FFmpeg 9.0.2, or from `scripts/linux-fixtures.sh`.
+
+`make coverage` records controller branch coverage in `.work/coverage/report.json`.
+`make mutants-diff` tests committed changes since the merge base with `origin/main`
+on the current native host (Linux x86-64, Linux ARM64, or macOS ARM64). Fetch the
+base branch and the pinned Buildlib revision before running it. Set
+`MUTATION_BASE` to compare with another revision and `MUTATION_BUILDLIB` to use
+a different local Buildlib checkout. The hosted gate runs the same selected
+scopes on all three hosts.

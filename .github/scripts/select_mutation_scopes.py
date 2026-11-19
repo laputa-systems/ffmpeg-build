@@ -90,6 +90,7 @@ def select(changes: Mapping[str, str], sources: Mapping[str, tuple[bytes, bytes]
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--lines", action="store_true")
     parser.add_argument("base")
     parser.add_argument("buildlib_scripts", type=Path)
     args = parser.parse_args()
@@ -110,7 +111,12 @@ def main() -> None:
         for path in {scope_source(scope) for scope in SCOPES}
         if changes.get(path) == "M"
     }
-    print(json.dumps(select(changes, sources)))
+    scopes = select(changes, sources)
+    if args.lines:
+        for scope in scopes:
+            print(scope)
+    else:
+        print(json.dumps(scopes))
 
 
 if __name__ == "__main__":

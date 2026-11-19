@@ -19,16 +19,19 @@ jobs:
     timeout-minutes: 5
     outputs:
       scopes: ${{ steps.select.outputs.scopes }}
+      buildlib: ${{ steps.pin.outputs.rev }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - id: pin
+        run: printf 'rev=%s\n' "$(< .github/mutation-buildlib-revision)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: laputa-systems/buildlib
-          ref: 6b2f4deb0a9afe024665863b6dd629fcfbd3c918
+          ref: ${{ steps.pin.outputs.rev }}
           path: .work/buildlib
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
@@ -60,7 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: laputa-systems/buildlib
-          ref: 6b2f4deb0a9afe024665863b6dd629fcfbd3c918
+          ref: ${{ needs.plan.outputs.buildlib }}
           path: .work/buildlib
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
@@ -70,18 +73,7 @@ jobs:
         env:
           SCOPE: ${{ matrix.scope }}
           NATIVE_RUNNER: ${{ matrix.runner }}
-        run: |
-          root="$PWD"
-          mkdir -p .work/tmp
-          proof=$(mktemp -d "$root/.work/tmp/whole-change.XXXXXXXX")
-          mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
-          touch "$proof/.work/cache/sources/.keep"
-          export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-          git archive HEAD | tar -x -C "$proof"
-          uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
-            cd "$1"
-            python .github/scripts/verify_mutation_scope.py "$2" "$3" "$4"
-          ' whole-change "$proof" "$SCOPE" "$NATIVE_RUNNER" "$root/.work/buildlib/scripts"
+        run: scripts/run-mutation-scope.sh "$SCOPE" "$NATIVE_RUNNER" "$PWD/.work/buildlib/scripts"
 
   whole-change:
     if: always()
