@@ -523,6 +523,238 @@ class SourceAcquisitionTests(unittest.TestCase):
                 self.assertEqual(cached.read_bytes(), b"prior invalid bytes")
 
 
+class StageSynthesisTests(unittest.TestCase):
+    def setUp(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(dir=scratch)))
+
+    def test_manifest_matches_generated_configuration_and_source_lock(self):
+        work = self.root / "work"
+        stage = self.root / "stage"
+        (work / "ffbuild").mkdir(parents=True)
+        (work / "ffbuild/config.mak").write_text(
+            "FFMPEG_CONFIGURATION=--enable-libdav1d --prefix=/opt/ffmpeg-build\n"
+            "CONFIG_LIBDAV1D=yes\n",
+            encoding="utf-8",
+        )
+        (work / "config_components.h").write_text(
+            "#define CONFIG_MOVTEXT_DECODER 1\n#define CONFIG_AV1_DECODER 1\n#define CONFIG_FILE_PROTOCOL 1\n",
+            encoding="utf-8",
+        )
+        (work / "config.h").write_text('#define FFMPEG_LICENSE "LGPL version 2.1 or later"\n', encoding="utf-8")
+        target = "aarch64-apple-darwin"
+        profile = {
+            "profile": "fixture", "artifact": "runtime", "sources": ["zlib", "ffmpeg", "dav1d"],
+            "components": {"decoders": ["mov_text"], "protocols": ["file"]},
+            "targets": {target: {
+                "platform": "macos", "arch": "aarch64", "bundled_dependencies": ["zlib", "dav1d"],
+                "frameworks": ["CoreMedia"], "system_libraries": ["fixture-system"],
+            }},
+        }
+        args = ["--enable-libdav1d", "--prefix=/opt/ffmpeg-build"]
+        toolchain = {"cc": "Apple Clang fixture"}
+        upstream = build.load_sources()
+        libraries = {"libavcodec": {"file": "lib/libavcodec.dylib"}}
+        commit = "1234" * 10
+        with (
+            mock.patch.object(build, "output", return_value=commit) as output,
+            mock.patch.object(build, "runtime_libraries_manifest", return_value=libraries) as inspect,
+        ):
+            manifest = build.manifest_for(profile, target, work, stage, args, toolchain)
+        output.assert_called_once_with(["git", "-C", str(ROOT), "rev-parse", "HEAD"])
+        inspect.assert_called_once_with(stage, "macos")
+        self.assertEqual(manifest, {
+            "contract": 1, "profile": "fixture", "target": target,
+            "sources": {
+                name: {"version": upstream[name].version, "url": upstream[name].url, "sha256": upstream[name].sha256}
+                for name in ("zlib", "ffmpeg", "dav1d")
+            },
+            "producer": {"repository": "laputa-systems/ffmpeg-build", "commit": commit},
+            "configure": "--enable-libdav1d --prefix=/opt/ffmpeg-build", "configure_args": args,
+            "components": {"decoders": ["av1", "movtext"], "protocols": ["file"]},
+            "requested_components": {"decoders": ["mov_text"], "protocols": ["file"]},
+            "auto_selected": {"decoders": ["av1"]}, "external_libraries": ["dav1d"],
+            "bundled_dependencies": ["zlib", "dav1d"], "frameworks": ["CoreMedia"],
+            "system_libraries": ["fixture-system"], "toolchain": toolchain,
+            "license": "LGPL version 2.1 or later", "libraries": libraries,
+        })
+        profile["artifact"] = "sdk"
+        profile["targets"][target] = {"platform": "macos", "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "output", return_value=commit),
+            mock.patch.object(build, "runtime_libraries_manifest") as inspect,
+        ):
+            static = build.manifest_for(profile, target, work, stage, args, toolchain)
+            inspect.assert_not_called()
+        del manifest["libraries"]
+        manifest.update(bundled_dependencies=[], frameworks=[], system_libraries=[])
+        self.assertEqual(static, manifest)
+
+    def test_producer_identity_and_configured_license_must_be_present(self):
+        for invalid in ("", "A" * 40, "a" * 39, "a" * 40 + " more"):
+            with (
+                self.subTest(commit=invalid),
+                mock.patch.object(build, "output", return_value=invalid),
+                self.assertRaises(SystemExit) as error,
+            ):
+                build.git_commit()
+            self.assertEqual(str(error.exception), f"error: git rev-parse HEAD returned {invalid!r}, not a commit hash")
+
+        config = self.root / "config.h"
+        config.write_text('#define FFMPEG_LICENSE ""\n#define OTHER_LICENSE "GPL"\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as error:
+            build.parse_license(self.root)
+        self.assertEqual(str(error.exception), f"error: no FFMPEG_LICENSE in {config}")
+
+    def test_writes_canonical_manifest_to_the_consumer_path(self):
+        relative = "share/ffmpeg-build/manifest.json"
+        manifest = {"z": [1], "a": "fixture"}
+        for _ in range(2):
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.write_manifest(self.root, manifest)
+            self.assertEqual((self.root / relative).read_bytes(), b'{\n  "a": "fixture",\n  "z": [\n    1\n  ]\n}\n')
+            self.assertEqual(stdout.getvalue(), f"wrote {self.root / relative}\n")
+
+    def test_installs_source_notices_and_labels_the_artifact(self):
+        source_root = self.root / "sources"
+        sources = {}
+        notices = {
+            "ffmpeg": ("LICENSE.md", "COPYING.GPLv2", "COPYING.LGPLv2.1", "CREDITS"),
+            "zlib": ("LICENSE",),
+        }
+        for name, filenames in notices.items():
+            source = source_root / name
+            sources[name] = source
+            source.mkdir(parents=True)
+            for filename in filenames:
+                (source / filename).write_bytes(f"{name}:{filename} notice\n".encode())
+        for artifact, test_only, details in (
+            ("sdk", False, [
+                "include/            FFmpeg, dav1d, and zlib headers",
+                "lib/*.a             static FFmpeg libraries, libdav1d.a, libz.a",
+                "lib/pkgconfig/      relocatable pkg-config files; use pkg-config --static",
+            ]),
+            ("runtime", False, [
+                "bin/ffmpeg, bin/ffprobe   headless; no network protocols; lavfi is the only device; load lib/ relative to bin/",
+                "lib/                shared libavcodec, libavdevice, libavformat, libavfilter, libavutil, libswresample, libswscale",
+                "                    with dav1d and zlib linked in; keep the version symlinks",
+                "include/            FFmpeg headers",
+                "lib/pkgconfig/      relocatable pkg-config files for shared linking (prefix=${pcfiledir}/../..)",
+            ]),
+            ("tools", True, ["bin/ffmpeg, bin/ffprobe   static, test-only fixture generator; not a runtime; GPL"]),
+            ("tools", False, ["bin/ffmpeg, bin/ffprobe   static, headless; no network protocols; lavfi is the only device"]),
+        ):
+            with self.subTest(artifact=artifact, test_only=test_only):
+                license_name = "lgpl" if artifact == "sdk" else "gpl"
+                profile = {"profile": artifact, "artifact": artifact, "license": license_name, "sources": ["ffmpeg", "zlib"]}
+                if test_only:
+                    profile["test_only"] = True
+                stage = self.root / f"stage-{artifact}-{test_only}"
+                if artifact == "tools" and not test_only:
+                    (stage / "share/licenses/ffmpeg").mkdir(parents=True)
+                build.install_notices(profile, "x86_64-unknown-linux-musl", sources, stage)
+                paths = {"README"}
+                for name, filenames in notices.items():
+                    for filename in filenames:
+                        if artifact == "sdk" and filename == "COPYING.GPLv2":
+                            continue
+                        relative = f"share/licenses/{name}/{filename}"
+                        paths.add(relative)
+                        self.assertEqual((stage / relative).read_bytes(), f"{name}:{filename} notice\n".encode())
+                self.assertEqual({entry.relative_to(stage).as_posix() for entry in stage.rglob("*") if entry.is_file()}, paths)
+                expected = "\n".join([
+                    f"FFmpeg {artifact} for x86_64-unknown-linux-musl",
+                    "Built by https://github.com/laputa-systems/ffmpeg-build from pinned upstream sources.",
+                    "",
+                    *details,
+                    "share/ffmpeg-build/manifest.json   sources, configuration, components, toolchain",
+                    "share/licenses/     upstream licenses and notices for ffmpeg, zlib",
+                    "",
+                ])
+                self.assertEqual((stage / "README").read_text(encoding="utf-8"), expected)
+
+    def test_prunes_only_the_unshipped_files_for_each_stage(self):
+        paths = {
+            "share/man/manual": "", "share/ffmpeg/preset": "", "share/doc/readme": "", "share/examples/example": "",
+            "include/header": "header", "lib/library": "library", "bin/ffplay": "unsupported",
+            "bin/ffmpeg": "tool", "bin/ffprobe": "tool", "share/licenses/notice": "license",
+        }
+        retained_files = {
+            "sdk": {"include/header", "lib/library"},
+            "runtime": {"include/header", "lib/library", "bin/ffmpeg", "bin/ffprobe"},
+            "tools": {"bin/ffmpeg", "bin/ffprobe"},
+        }
+        for artifact, retained in retained_files.items():
+            stage = self.root / artifact
+            for relative, payload in paths.items():
+                if artifact == "tools" and relative == "bin/ffplay":
+                    continue
+                path = stage / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(payload, encoding="utf-8")
+            with self.subTest(artifact=artifact):
+                build.prune_stage(stage, artifact)
+                self.assertEqual(
+                    {path.relative_to(stage).as_posix() for path in stage.rglob("*") if path.is_file()},
+                    retained | {"share/licenses/notice"},
+                )
+                self.assertEqual((stage / "bin").is_dir(), artifact != "sdk")
+
+    def test_finishes_programs_and_signs_only_real_macos_libraries(self):
+        for platform_name in ("macos", "linux"):
+            programs = []
+            for name in ("ffmpeg", "ffprobe"):
+                executable = str(self.root / "bin" / name)
+                if platform_name == "macos":
+                    programs.extend([mock.call(["strip", executable]), mock.call(["codesign", "--force", "--sign", "-", executable])])
+                else:
+                    programs.append(mock.call(["strip", "--strip-all", executable]))
+            with self.subTest(platform=platform_name), mock.patch.object(build, "run") as run:
+                build.finish_programs({"platform": platform_name}, self.root)
+                self.assertEqual(run.call_args_list, programs)
+
+        library_dir = self.root / "lib"
+        library_dir.mkdir()
+        library = library_dir / "libavcodec.60.1.dylib"
+        library.write_bytes(b"library")
+        (library_dir / "libavcodec.dylib").symlink_to(library.name)
+        (library_dir / "libavcodec.a").write_bytes(b"static")
+        with mock.patch.object(build, "run") as run:
+            build.sign_libraries({"platform": "macos"}, self.root)
+        run.assert_called_once_with(["codesign", "--force", "--sign", "-", str(library)])
+        with mock.patch.object(build, "run") as run:
+            build.sign_libraries({"platform": "linux"}, self.root)
+        run.assert_not_called()
+
+    def test_normalizes_pkg_config_keys_without_rewriting_other_files(self):
+        with self.assertRaises(SystemExit) as error:
+            build.normalize_pc(self.root)
+        self.assertEqual(str(error.exception), f"error: no pkg-config directory in {self.root}")
+        pc_dir = self.root / "lib/pkgconfig"
+        pc_dir.mkdir(parents=True)
+        path = pc_dir / "libavcodec.pc"
+        unrelated = pc_dir / "README"
+        unrelated.write_text("keep\n", encoding="utf-8")
+        path.write_text(
+            f"prefix={self.root}\nexec_prefix=/opt/ffmpeg-build\nlibdir=/lib\nincludedir=/include\n"
+            f"sharedlibdir=/lib64\nCflags: -I{self.root}/include -I/opt/ffmpeg-build/include\n"
+            "Libs: -lavcodec\nLibs.private: -lm -lz\n",
+            encoding="utf-8",
+        )
+        build.normalize_pc(self.root)
+        normalized = (
+            "prefix=${pcfiledir}/../..\nexec_prefix=${prefix}\nlibdir=${prefix}/lib\n"
+            "includedir=${prefix}/include\nsharedlibdir=${libdir}\n"
+            "Cflags: -I${pcfiledir}/../../include -I${pcfiledir}/../../include\n"
+            "Libs: -lavcodec\nLibs.private: -lm -lz\n"
+        )
+        self.assertEqual(path.read_text(encoding="utf-8"), normalized)
+        build.drop_static_link_flags(self.root)
+        self.assertEqual(path.read_text(encoding="utf-8"), normalized.replace("Libs.private: -lm -lz", "Libs.private:"))
+        self.assertEqual(unrelated.read_bytes(), b"keep\n")
+
+
 class StageTests(unittest.TestCase):
     def setUp(self):
         build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
