@@ -685,6 +685,31 @@ defaults. Variant 199 stops object inspection after an archive has
 already caused rejection. The remaining 24 variants change displayed
 audit details. All 128 ordinary tests and both linters passed.
 
+The native SDK repeat at `85e441120271a358cfd0e4fb15ecee2a559e5c77`
+accounted for all 288 identities on both Linux architectures and
+macOS. Linux caught 261 and macOS caught 243. The 18 path-case variants
+above explain the difference. The tools results also matched the
+previous native run. Runtime with the exit-status fix caught 285 of
+376 identities on Linux and 275 on macOS.
+[Native SDK and runtime repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44451573304)
+
+The runtime fixtures now check the full missing-stage report without
+invoking inspection tools. The populated stage independently detects
+missing programs and headers, an extra staged link and library file,
+pkg-config and library identity mismatches, networking and hardware
+capabilities. The matched local runtime selection catches 316 of
+376 identities, 41 more than the previous fixture. All 129 ordinary
+tests and both linters passed.
+
+The runtime fixture now requires the native library identity
+command for the selected platform. It checks that ffprobe is still
+probed after a missing ffmpeg, that empty version output is rejected,
+and that omitted capability lists are read as empty. The Linux case
+also names both dav1d and zlib configuration headers in its rejection.
+The matched local selection catches 329 of 376 identities, 13 more
+than the preceding fixture. All 130 ordinary tests and both linters
+passed. Native runtime repetition remains in DSLP-4.
+
 ## Tickets
 
 

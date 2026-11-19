@@ -774,8 +774,10 @@ class StageTests(unittest.TestCase):
         def output(arguments):
             match arguments:
                 case ["readelf", "-dW", binary]:
+                    self.assertEqual(platform, "linux")
                     return f"0x000000000000000e (SONAME) Library soname: [{identities[pathlib.Path(binary)]}]"
                 case ["otool", "-l", binary]:
+                    self.assertEqual(platform, "macos")
                     return f"Load command 0\n cmd LC_ID_DYLIB\n name {identities[pathlib.Path(binary)]} (offset 24)\n"
                 case [binary, "-hide_banner", flag]:
                     self.assertEqual(pathlib.Path(binary), binaries / "ffmpeg")
@@ -784,6 +786,7 @@ class StageTests(unittest.TestCase):
                     self.fail(f"unexpected inspection: {arguments}")
 
         version_exits = {}
+        empty_output = set()
 
         def version(arguments, **kwargs):
             binary, *flags = arguments
@@ -793,7 +796,8 @@ class StageTests(unittest.TestCase):
             self.assertEqual(kwargs, {"capture_output": True, "text": True, "check": False})
             status = version_exits.get(path.name, 0)
             return subprocess.CompletedProcess(
-                arguments, status, stdout=f"{path.name} version 9.0.2 fixture\n",
+                arguments, status,
+                stdout="" if path.name in empty_output else f"{path.name} version 9.0.2 fixture\n",
                 stderr="fixture command failure" if status else "",
             )
 
@@ -827,24 +831,120 @@ class StageTests(unittest.TestCase):
             ])
             version_exits.clear()
 
-            (stage / "include" / "zlib.h").write_bytes(b"bundled header")
-            util = stage / entries["libavutil"]["file"]
-            util.write_bytes(b"changed runtime payload")
-            command_outputs["-protocols"] = "Input:\n  file\n  http\n"
-            command_outputs["-encoders"] = ""
+            missing = binaries / "ffmpeg"
+            original_program = missing.read_bytes()
+            missing.unlink()
+            empty_output.add("ffprobe")
             audit = build.Audit()
             with redirect_stdout(io.StringIO()) as stdout:
                 build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
                 self.assertEqual(audit.finish(), 1, stdout.getvalue())
             self.assertEqual(
                 [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["programs are ffmpeg and ffprobe", "ffmpeg present", "ffprobe runs from the stage and reports 9.0.2"],
+            )
+            empty_output.clear()
+            missing.write_bytes(original_program)
+
+            (stage / "include" / "zlib.h").write_bytes(b"bundled header")
+            (stage / "include" / "device.h").symlink_to("libavdevice/avdevice.h")
+            (stage / "include" / "libavcodec" / "avcodec.h").unlink()
+            (stage / "lib" / "unlisted.txt").write_bytes(b"unexpected library payload")
+            (pkgconfig / "libavfilter.pc").unlink()
+            (pkgconfig / "libavutil.pc").write_text("prefix=/fixture/nonrelocatable\n", encoding="utf-8")
+            (binaries / "ffprobe").unlink()
+            util = stage / entries["libavutil"]["file"]
+            identity = identities[util]
+            identities[util] = "libunexpected"
+            util.write_bytes(b"changed runtime payload")
+            command_outputs.update({
+                "-buildconf": "--enable-network",
+                "-protocols": "Input:\n  file\n  http\n",
+                "-encoders": "",
+                "-hwaccels": "Hardware acceleration methods:\nunsupported\n",
+            })
+            audit = build.Audit()
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.audit_runtime(
+                    audit.case, config, stage, "9.0.2",
+                    {"encoders": ["aac"]}, {"protocols": ["file", "http"]}, {"libraries": entries},
+                )
+                self.assertEqual(audit.finish(), 1, stdout.getvalue())
+            self.assertEqual(
+                [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
                 [
+                    "programs are ffmpeg and ffprobe",
+                    "FFmpeg headers present",
                     "no dav1d or zlib headers",
+                    "symlinks are relative, inside lib/, and resolve",
+                    "lib/ holds exactly the seven FFmpeg libraries and their links",
+                    "pkg-config files are the seven libraries",
+                    "libavutil.pc relocatable and shared-only",
+                    f"libavutil {key} is {identity}",
                     "manifest libraries match the stage",
+                    "ffprobe present",
+                    "ffmpeg -buildconf has --disable-network",
                     "ffmpeg -protocols lists exactly the profile protocols",
                     "ffmpeg -encoders lists exactly the profile encoders",
+                    f"ffmpeg -hwaccels is ['{hwaccel}']",
                 ],
             )
+
+    def test_runtime_audit_reports_missing_stage_files_without_invoking_tools(self):
+        config = {"platform": "linux", "arch": "aarch64"}
+        with (
+            mock.patch.object(build, "output") as inspect,
+            mock.patch.object(build.subprocess, "run") as program,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            audit = build.Audit()
+            build.audit_runtime(audit.case, config, self.stage, "9.0.2", {}, {}, {"libraries": {}})
+            self.assertEqual(audit.finish(), 1, stdout.getvalue())
+        inspect.assert_not_called()
+        program.assert_not_called()
+        self.assertEqual(
+            [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+            [
+                "programs are ffmpeg and ffprobe",
+                "FFmpeg headers present",
+                "lib/ holds exactly the seven FFmpeg libraries and their links",
+                "pkg-config files are the seven libraries",
+                "ffmpeg present",
+                "ffprobe present",
+            ],
+        )
+
+    def test_runtime_reports_bundled_headers_and_empty_capability_lists(self):
+        config = {"platform": "linux", "arch": "aarch64"}
+        program = self.stage / "bin" / "ffmpeg"
+        program.parent.mkdir(parents=True)
+        program.write_bytes(b"runtime fixture")
+        include = self.stage / "include"
+        (include / "dav1d").mkdir(parents=True)
+        (include / "zconf.h").write_bytes(b"unexpected header")
+        responses = {
+            "-buildconf": "--disable-network",
+            "-protocols": "Input:\nOutput:\n",
+            "-encoders": "------\n",
+            "-hwaccels": "Hardware acceleration methods:\nvaapi\n",
+        }
+        with (
+            mock.patch.object(build, "output", side_effect=lambda argv: responses[argv[-1]]),
+            mock.patch.object(build.subprocess, "run", return_value=subprocess.CompletedProcess(
+                [str(program), "-hide_banner", "-version"], 0, "ffmpeg version 9.0.2 fixture\n", "",
+            )),
+            mock.patch.object(build, "audit_runtime_elf"),
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            audit = build.Audit()
+            build.audit_runtime(audit.case, config, self.stage, "9.0.2", {}, {}, {"libraries": {}})
+            self.assertEqual(audit.finish(), 1, stdout.getvalue())
+        self.assertIn(
+            "FAIL audit: no dav1d or zlib headers: found: ['include/dav1d', 'include/zconf.h']",
+            stdout.getvalue(),
+        )
+        self.assertIn("PASS audit: ffmpeg -protocols lists exactly the profile protocols", stdout.getvalue())
+        self.assertIn("PASS audit: ffmpeg -encoders lists exactly the profile encoders", stdout.getvalue())
 
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
