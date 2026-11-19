@@ -844,6 +844,35 @@ class StageTests(unittest.TestCase):
             line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")
         ], ["ffversion is 9.0.2", "headers present", "pkg-config files present", "static archives present"])
 
+    def test_audit_sdk_rejects_an_archive_without_objects(self):
+        scratch = pathlib.Path(self.temp.name) / "fresh" / "objects"
+        target = "aarch64-unknown-linux-musl"
+        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted"]}
+        profile = "play-sdk"
+        archive = self.stage / "lib" / "libempty.a"
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b"fixture archive")
+
+        def extract(arguments, *, cwd, quiet):
+            self.assertEqual(arguments, ["ar", "x", str(archive)])
+            self.assertTrue(quiet)
+            self.assertEqual(cwd, scratch / f"audit-{target}-{profile}-{archive.name}")
+            (cwd / "note.txt").write_bytes(b"no object members")
+            return subprocess.CompletedProcess(arguments, 0)
+
+        with (
+            mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "run", side_effect=extract) as tool,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            check = build.Audit()
+            build.audit_sdk(check.case, target, profile, config, self.stage, "9.0.2")
+            self.assertEqual(check.finish(), 1, stdout.getvalue())
+        tool.assert_called_once()
+        self.assertIn("FAIL audit: bundled dependency unlisted: unknown bundled dependency", stdout.getvalue())
+        self.assertIn("FAIL audit: archives contain object code, not bitcode: libempty.a: no objects", stdout.getvalue())
+        self.assertEqual(list(scratch.iterdir()), [])
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]
