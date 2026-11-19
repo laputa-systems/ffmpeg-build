@@ -775,6 +775,32 @@ the spelling of `tar` on the case-folded executable path. Use
 the usual controller archive and the three function selectors.
 The ordinary suite and lint passed.
 
+The staged filesystem and runtime policy trial at `a88b5795` matched
+308 function-level mutations across the before and candidate archives.
+On macOS ARM64, the previous tests caught 217, left 41 surviving and
+selected no tests for the 50 runtime manifest writer mutations. The
+candidate caught 306, with two equivalent falsey parser initializers
+(`ffmpeg_protocols` 2 and `ffmpeg_codec_names` 2) and no other outcomes.
+A separate 71-identity rerun confirmed the final pkg-config assertions.
+The source and the rendered mutations stayed unchanged.
+
+The fixtures distinguish regular and special files from links in a real
+stage, exercise both loader identity formats, check every library's
+content digest and verify that missing layout and invalid links fail.
+Runtime policy fixtures also cover FFmpeg's input and output protocol
+headings, optional system dependencies, and relocatable pkg-config
+values, including assignments that contain an equals sign.
+
+Use the controller archive recipe with `tests/test_build.py` and
+`build.x_<function>__mutmut_*`. The filesystem functions are
+`sibling_name`, `symlink_problems`, `resolve_link`, `stage_tree`,
+`stage_links`, `runtime_libraries_manifest`, `library_identity`,
+`library_link_names`, and `identity_key`. The policy functions are
+`ffmpeg_protocols`, `ffmpeg_codec_names`, `ffmpeg_hwaccel_types`,
+`exported_symbols`, `bundled_symbol_exports`, `foreign_elf_needed`,
+`foreign_macho_loads`, and `pc_problems`. All 141 ordinary tests and
+both linters passed.
+
 ## Tickets
 
 
