@@ -601,6 +601,13 @@ clears the object scratch. The SDK selection now exercises all
 with `build.x_audit_sdk__mutmut_*`. The 74 survivors remain in
 DSLP-4. All 125 ordinary tests and both linters passed.
 
+A second SDK fixture exercises an archive with no object members and
+an unlisted bundled dependency. It checks the extraction tool's arguments
+and scratch location, both audit failures, and cleanup after rejection.
+With unchanged source and matching spans, the same 288-identity selection
+catches 229, up from 214. The 59 survivors remain under DSLP-4. All 126
+ordinary tests and both linters passed.
+
 ## Tickets
 
 
