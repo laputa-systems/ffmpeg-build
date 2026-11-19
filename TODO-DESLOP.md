@@ -759,6 +759,22 @@ The native trial keeps the mutation generator in UTF-8. The profile
 fixture applies an ASCII default only when the actual read omits its
 explicit encoding.
 
+
+**Source acquisition**
+
+The source fixture uses two local archives through the normal lock
+reader, verified cache and extraction command. It checks source
+order, exact cached bytes, reuse of the extraction directory,
+rejection of missing profile entries and missing archive roots,
+and preservation of an existing cache object after an unavailable
+source fails verification.
+
+The `fetch_source`, `fetch_profile_sources` and `extract_source`
+selection caught 51 of 52 on macOS ARM64. The only survivor changes
+the spelling of `tar` on the case-folded executable path. Use
+the usual controller archive and the three function selectors.
+The ordinary suite and lint passed.
+
 ## Tickets
 
 
