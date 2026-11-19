@@ -1,0 +1,82 @@
+name: native audit mutation census
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  audit:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm, xcode-27]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: 1497970d9454a6a9875b1f201cbaad71fd92a010
+          path: .work/buildlib
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15.2
+      - name: Measure and account for audit identities
+        run: |
+          proof="$PWD/.work/tmp/audit-proof"
+          mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
+          touch "$proof/.work/cache/sources/.keep"
+          export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+          git archive HEAD | tar -x -C "$proof"
+          cat >> "$proof/pyproject.toml" <<'TOML'
+
+          [tool.mutmut]
+          source_paths = ["build.py"]
+          also_copy = ["tests", "bootstrap.py", "sources.lock.json", "profiles",
+                       ".work/cache/sources", ".github/scripts", "patches", "scripts", "Makefile"]
+          pytest_add_cli_args_test_selection = ["tests/test_build.py"]
+          pytest_add_cli_args = ["-k", "inconsistent_build_tree or audit_runtime_checks_shared_configuration or audit_sdk_rejects_effective or audit_requires_native_host"]
+          use_setproctitle = false
+          TOML
+          uv run --frozen --python 3.15.2 --with mutmut==3.8.1 --with pytest==9.2.0 bash -euc '
+            cd "$1"
+            python -m mutmut run --max-children 1 "build.x_audit__mutmut_*"
+          ' audit-proof "$proof"
+          for part in meta spans; do
+            printf '%s ' "$part"
+            gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n'
+            printf '\n'
+          done
+          uv run --frozen --python 3.15.2 python - "$proof" "$PWD/.work/buildlib/scripts" <<'PY'
+          import sys
+          from collections import Counter
+          from pathlib import Path
+
+          sys.path.insert(0, sys.argv[2])
+          from mutants_gate import load_json, read_results
+
+          directory = Path(sys.argv[1]) / "mutants"
+          meta = directory / "build.py.meta"
+          spans = directory / "build.py.spans"
+          names = load_json(meta)["exit_code_by_key"]
+          prefix = "build.x_audit__mutmut_"
+          pending = {name for name in names if not name.startswith(prefix)}
+          results = read_results(meta, spans, "build.", pending)
+          audit = {name: outcome for name, outcome in results.items() if name.startswith(prefix)}
+          assert len(audit) == 696, len(audit)
+          print("Outcome totals:", dict(sorted(Counter(audit.values()).items())))
+          for name, outcome in sorted(audit.items()):
+              if outcome != "killed":
+                  print(outcome, name)
+          PY
