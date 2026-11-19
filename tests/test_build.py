@@ -7,6 +7,7 @@ import tempfile
 import tomllib
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -193,6 +194,62 @@ class ProfileTests(unittest.TestCase):
     def test_absolute_build_tree_marker(self):
         self.assertTrue(build.ABSOLUTE_BUILD_TREE.search(b"/home/runner/x/.work/build/a.c"))
         self.assertFalse(build.ABSOLUTE_BUILD_TREE.search(b"./.work/build/a.c"))
+
+
+class SourceAcquisitionTests(unittest.TestCase):
+    def test_fetches_locked_local_archives_in_order_and_extracts_declared_root(self):
+        build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=build.TMP_ROOT) as directory:
+            root = pathlib.Path(directory)
+            cache = root / "cache"
+            sources = {}
+            local = {}
+            for name in ("first", "second"):
+                archive = root / f"{name}.tar"
+                contents = f"source fixture {name}".encode()
+                with build.tarfile.open(archive, "w") as output:
+                    record = build.tarfile.TarInfo(f"unpacked-{name}/README")
+                    record.size = len(contents)
+                    output.addfile(record, io.BytesIO(contents))
+                sources[name] = build.locks.Input(
+                    name=name, version="v1", sha256=hashing.sha256_file(archive),
+                    urls=(archive.as_uri(),), size=archive.stat().st_size, role="source",
+                    extra={"filename": f"{name}-fixture.tar", "archive_root": f"unpacked-{name}"},
+                )
+                local[name] = archive
+
+            with mock.patch.object(build, "CACHE", cache), redirect_stdout(io.StringIO()) as stdout:
+                build.fetch_profile_sources({"profile": "fixture", "sources": ["second", "first"]}, sources)
+                self.assertEqual(stdout.getvalue().splitlines(), [
+                    f"fetch {name} v1 sha256 {sources[name].sha256}" for name in ("second", "first")
+                ])
+                for name in ("first", "second"):
+                    cached = cache / f"{name}-fixture.tar"
+                    self.assertEqual(cached.read_bytes(), local[name].read_bytes())
+                    destination = root / "new" / "extract"
+                    extracted = build.extract_source(sources[name], destination)
+                    self.assertEqual(extracted, destination / f"unpacked-{name}")
+                    self.assertEqual((extracted / "README").read_bytes(), f"source fixture {name}".encode())
+                missing = replace(sources["first"], extra={**sources["first"].extra, "archive_root": "missing-root"})
+                with self.assertRaisesRegex(SystemExit, "^error: archive first-fixture.tar did not contain missing-root$"):
+                    build.extract_source(missing, root / "ordinary-extraction")
+
+                for names, diagnostic in (
+                    (None, "^error: profile fixture has no sources$"),
+                    ("first", "^error: profile fixture has no sources$"),
+                    ([], "^error: profile fixture has no sources$"),
+                    (["missing"], "^error: profile fixture references unknown source missing$"),
+                ):
+                    with self.subTest(names=names), self.assertRaisesRegex(SystemExit, diagnostic):
+                        build.fetch_profile_sources({"profile": "fixture", "sources": names}, sources)
+
+                item = sources["first"]
+                cached = cache / "first-fixture.tar"
+                cached.write_bytes(b"prior invalid bytes")
+                local["first"].unlink()
+                with self.assertRaisesRegex(SystemExit, "^error: first: no URL served the pinned bytes"):
+                    build.fetch_source("first", item)
+                self.assertEqual(cached.read_bytes(), b"prior invalid bytes")
 
 
 class StageTests(unittest.TestCase):
