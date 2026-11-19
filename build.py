@@ -2082,14 +2082,16 @@ def archive_member_problems(members, root_name):
     regular = set()
     for member in members:
         path = pathlib.PurePosixPath(member.name)
-        inside = False
-        if path.is_absolute() or ".." in path.parts:
+        parts = path.parts
+        relative = None
+        if path.is_absolute() or ".." in parts:
             problems.append(f"unsafe path {member.name}")
-        elif path.parts[0] != root_name:
+        elif not parts or parts[0] != root_name:
             problems.append(f"outside root {member.name}")
-        else:
-            inside = len(path.parts) > 1
-        relative = pathlib.PurePosixPath(*path.parts[1:]).as_posix() if inside else None
+        elif len(parts) > 1:
+            relative = pathlib.PurePosixPath(*parts[1:]).as_posix()
+        elif not member.isdir():
+            problems.append(f"archive root is not a directory: {member.name}")
         if member.issym():
             if relative is not None:
                 links[relative] = member.linkname

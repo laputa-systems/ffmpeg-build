@@ -546,6 +546,36 @@ are unchanged. Those IDs are:
 530, 533, 536, 552, 556, 557, 633, 636, 641, 653
 ```
 
+The hosted audit repeat at `ca2b8af0f08e8c6e1723f429dc53b9b2f0230554`
+passed on x86-64 Linux, ARM64 Linux and ARM64 macOS. Each run caught
+637 of the same 696 identities. The selected code maps and full
+source spans also match the local run. The compressed sidecars
+are recorded in 3,000-character chunks. Join chunks by label
+and decode Base64 and gzip. The full spans file has SHA-256
+`35522818f5d9e886cf0fef3972bac72087d9012710e011f84f583a6dd1f39366`.
+[Native audit repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44437270876)
+
+The archive admission check now reports an unnamed root and a
+regular file at the named root. A regular tar directory named
+`.` previously caused an indexing exception while inspecting the
+member list. The manifest parser also has a positive case for a
+library without explicit link entries. All 123 ordinary tests,
+Ruff and ty passed.
+
+With all of `tests/test_build.py` selected at `d1dde2cc`, the
+`qualify`, `package`, `parse_stage_manifest`,
+`archive_member_problems` and `extracted_library_problems` census
+caught 610 of 620 identities. Reuse the audit archive recipe with
+those five function patterns instead of `audit` and omit the
+`-k` selector. The candidate catches 615 of 621. Archive admission
+changed source and catches all 36 in its new inventory. The
+unchanged manifest parser catches all 82 after the new positive
+case. The four package survivors numbered 30, 32, 34 and 167 change
+manifest or lock-file path casing. The other two survivors,
+`package` 89 and `qualify` 179, supply a different fallback that
+still fails the same producer-commit check. Native packaging and
+qualification accounting remain open.
+
 ## Tickets
 
 
@@ -554,7 +584,7 @@ are unchanged. Those IDs are:
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The complete audit entry point is dispositioned locally. Qualification survivors, wider native effects and a fail-closed whole-change mutation lane remain open.
+- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The complete audit entry point is dispositioned across three hosted architectures and OS combinations. Qualification survivors, wider native effects and a fail-closed whole-change mutation lane remain open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M

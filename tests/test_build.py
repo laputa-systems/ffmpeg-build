@@ -373,6 +373,15 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(path.read_text(), contents)
                     self.assertFalse(dist.exists())
 
+    def test_stage_manifest_preserves_library_with_no_link_entries(self):
+        target = "aarch64-apple-darwin"
+        path = self.write_package_stage(target, "e" * 40, "runtime")
+        manifest = json.loads(path.read_text())
+        manifest["libraries"] = {"libavutil": {"file": "lib/libavutil.60.dylib"}}
+        path.write_text(json.dumps(manifest))
+
+        self.assertEqual(build.parse_stage_manifest(path), manifest)
+
     def test_audit_requires_native_host_build_tree_and_stage(self):
         target = "aarch64-apple-darwin"
         build_root = pathlib.Path(self.temp.name) / "build"
@@ -1080,6 +1089,15 @@ class StageTests(unittest.TestCase):
             "non-normalized owner or mtime: root/group",
             "not a file, directory, or symlink: root/fifo",
             "outside root other/lib/alias",
+        ])
+
+    def test_archive_requires_a_directory_at_the_named_root(self):
+        unnamed = build.tarfile.TarInfo(".")
+        unnamed.type = build.tarfile.DIRTYPE
+        wrong_type = build.tarfile.TarInfo("root")
+        self.assertEqual(build.archive_member_problems([unnamed, wrong_type], "root"), [
+            "outside root .",
+            "archive root is not a directory: root",
         ])
 
     def test_extracted_library_problems_preserves_each_missing_field_diagnostic(self):
