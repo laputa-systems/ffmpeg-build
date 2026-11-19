@@ -522,6 +522,30 @@ diagnostic variants. Of the 121 survivors, 19 retain their diagnostic
 disposition and 102 still need review. All 121 ordinary tests, Ruff
 and ty passed.
 
+The matched four-test selection at `4c944154` caught 637 of the
+same 696 `audit` identities, up from 575 with no lost catches. The
+fixture covers effective protocol and codec metadata, optional
+profile fields, missing manifest details, the Linux header and a
+staged build-prefix leak. It verifies that each native artifact
+audit receives the active check callback. All 121 ordinary tests,
+Ruff and ty passed.
+
+The 59 survivors for the same `build.py` SHA-256 are dispositioned.
+IDs 128, 130, 144 and 146 replace an empty list with an equivalent
+false value in the immediately following truth test. IDs 331 and
+487 replace an empty-string fallback with a string that fails
+the same commit or musl check. The other 53 alter the diagnostic
+arguments to `Audit.case` or the printed auto-selection summary.
+The recorded booleans, exit status and downstream audit inputs
+are unchanged. Those IDs are:
+
+```text
+80, 83, 94, 97, 102, 105, 116, 117, 118, 133, 136, 149, 152, 159, 162,
+169, 170, 171, 235, 238, 255, 258, 261, 267, 268, 284, 287, 289, 290,
+291, 293, 294, 447, 450, 474, 477, 490, 491, 492, 520, 523, 528, 529,
+530, 533, 536, 552, 556, 557, 633, 636, 641, 653
+```
+
 ## Tickets
 
 
@@ -530,7 +554,7 @@ and ty passed.
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. Qualification survivors, native effects, and a fail-closed whole-change mutation lane remain open.
+- **Problem:** Coverage and scoped assembly, packaging and qualification mutations are measured above. The complete audit entry point is dispositioned locally. Qualification survivors, wider native effects and a fail-closed whole-change mutation lane remain open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M
