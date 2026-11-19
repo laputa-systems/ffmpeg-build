@@ -239,6 +239,112 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(manifest.read_bytes(), original)
                     self.assertEqual(stamp.read_bytes(), content)
 
+    def test_build_publishes_stamp_only_for_complete_stage(self):
+        target = "x86_64-unknown-linux-musl"
+        profile_name = "tools"
+        lock = build.load_sources()
+        profile, profile_path = build.load_profile(profile_name)
+        config = build.target_config(profile, target)
+        build_root = pathlib.Path(self.temp.name) / "build"
+        build_dir = build_root / target / profile_name
+        stage = self.stage / target / profile_name
+        deps = build_dir / "deps"
+        ffmpeg_build = build_dir / "ffmpeg"
+        source_root = build_dir / "src"
+        install_root = build_dir / "install"
+        manifest = stage / "share/ffmpeg-build/manifest.json"
+        stamp = build_dir / "stamp.json"
+        arguments = ["--disable-network"]
+        toolchain = {"compiler": "fixture"}
+        compile_env = {"FIXTURE": "compiler"}
+        complete = False
+
+        def extract(source, destination):
+            self.assertEqual(destination, source_root)
+            path = destination / source.name
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        def command(args, *, cwd, env=None):
+            if args == ["make", "install", f"DESTDIR={install_root}"]:
+                payload = install_root / build.INSTALL_PREFIX.lstrip("/")
+                for relative in ("bin/ffmpeg", "include/temporary.h", *(("bin/ffprobe",) if complete else ())):
+                    path = payload / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"fixture")
+
+        def notices(profile_arg, target_arg, sources, staging):
+            self.assertEqual((profile_arg, target_arg, staging), (profile, target, stage))
+            self.assertEqual(sources, {name: source_root / name for name in profile["sources"]})
+            for relative in build.notice_paths(profile):
+                path = staging / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture notice", encoding="utf-8")
+
+        ffmpeg_source = source_root / "ffmpeg"
+        dep_builders = {name: mock.Mock() for name in ("dav1d", "zlib")}
+        calls = [
+            mock.call(["patch", "-p1", "-i", build.ROOT / "patches/ffmpeg-owned-help.patch"], cwd=ffmpeg_source),
+            mock.call([str(ffmpeg_source / "configure"), *arguments], cwd=ffmpeg_build, env=compile_env),
+            mock.call(["make", "-j2"], cwd=ffmpeg_build, env=compile_env),
+            mock.call(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=compile_env),
+        ]
+        with (
+            mock.patch.multiple(
+                build, BUILD_ROOT=build_root, STAGE_ROOT=self.stage, DEPENDENCY_BUILDERS=dep_builders,
+                require_native_host=mock.DEFAULT, platform_toolchain=mock.DEFAULT,
+                configure_args_for=mock.DEFAULT, fetch_profile_sources=mock.DEFAULT, extract_source=mock.DEFAULT,
+                dep_env=mock.DEFAULT, ffmpeg_env=mock.DEFAULT, run=mock.DEFAULT, jobs=mock.DEFAULT,
+                install_notices=mock.DEFAULT, finish_programs=mock.DEFAULT, manifest_for=mock.DEFAULT,
+            ) as patched,
+            redirect_stdout(io.StringIO()),
+        ):
+            for name, value in (
+                ("platform_toolchain", toolchain), ("configure_args_for", arguments),
+                ("dep_env", compile_env), ("ffmpeg_env", compile_env), ("jobs", 2),
+                ("manifest_for", {"profile": profile_name, "target": target}),
+            ):
+                patched[name].return_value = value
+            patched["extract_source"].side_effect = extract
+            patched["run"].side_effect = command
+            patched["install_notices"].side_effect = notices
+
+            with self.assertRaisesRegex(SystemExit, "stage is incomplete after build"):
+                build.build(target, profile_name)
+            self.assertFalse(stamp.exists())
+            self.assertEqual(patched["run"].call_args_list, calls)
+
+            old = stage / "old"
+            old.touch()
+            complete = True
+            patched["run"].reset_mock()
+            patched["finish_programs"].reset_mock()
+            build.build(target, profile_name)
+            self.assertFalse(old.exists())
+            self.assertFalse(install_root.exists())
+            self.assertFalse((stage / "include").exists())
+            self.assertEqual(sorted(item.name for item in (stage / "bin").iterdir()), ["ffmpeg", "ffprobe"])
+            self.assertEqual(json.loads(manifest.read_text()), {"profile": profile_name, "target": target})
+            self.assertEqual(patched["run"].call_args_list, calls)
+            patched["finish_programs"].assert_called_once_with(config, stage)
+            self.assertEqual((ffmpeg_source / "VERSION").read_text(), lock["ffmpeg"].version + "\n")
+            for name, builder in dep_builders.items():
+                builder.assert_called_with(lock[name], source_root / name, build_dir / name, deps, compile_env, config)
+            self.assertEqual(json.loads(stamp.read_text()), {
+                "fingerprint": build.build_fingerprint(profile_path, target, profile_name, arguments, toolchain),
+                "target": target,
+                "profile": profile_name,
+                "sources": {name: {"version": lock[name].version, "sha256": lock[name].sha256}
+                            for name in profile["sources"]},
+                "profile_sha256": hashing.sha256_file(profile_path),
+                "build_py_sha256": hashing.sha256_file(build.ROOT / "build.py"),
+                "flags": arguments,
+                "toolchain": toolchain,
+            })
+            patched["fetch_profile_sources"].reset_mock()
+            build.build(target, profile_name)
+            patched["fetch_profile_sources"].assert_not_called()
+
     def test_package_writes_archive_and_release_manifest(self):
         commit = "e" * 40
         target = "aarch64-apple-darwin"
