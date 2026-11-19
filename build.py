@@ -305,8 +305,6 @@ def requested_components(profile, target):
         if category == "subtitle_decoders":
             if merged.get(category):
                 requested.setdefault("decoders", []).extend(merged[category])
-        elif category == "devices":
-            continue
         elif merged.get(category):
             requested[category] = list(merged[category])
     if requested.get("decoders"):

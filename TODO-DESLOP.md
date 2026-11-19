@@ -952,6 +952,30 @@ collector. Including the two mutation gate scripts gives
 verifier runs in the native jobs and its controller-suite
 coverage is zero.
 
+**Dead code (DSLP-5)**
+
+Ruff `F401,F841`, vulture 2.16 at confidence 60, and deptry 0.25.1
+returned no findings before or after the cut. The deptry scan maps
+`laputa-buildlib` to its import name `buildlib`. No exemptions
+were added.
+
+The manual sweep removed the unreachable `devices` branch in
+`requested_components`, two source lines. Nonempty devices are
+rejected before iteration, and the merge omits empty categories.
+The remaining profile and artifact contracts use the same
+configure arguments and audit fields. The scoped fixtures covered
+tools, runtime and SDK configurations, including invalid devices
+and permitted lavfi. The full 168-test suite and both linters passed.
+The local profile-resolution rerun caught all 130 variants.
+The preceding scope selected 134 and left three equivalent
+variants in the removed branch.
+
+The staged SDK and runtime pkg-config transforms keep distinct
+consumer contracts. The release collector, source cache, and native
+verification scripts each have separate entry points or artifact
+consumers. The sweep found no supported cut to those mechanisms.
+No live behavior was removed.
+
 **Cumulative review finding**
 
 An otherwise admissible tools build tree could pass `audit`
@@ -973,14 +997,6 @@ whole ordinary suite and both linters passed.
 
 
 
-### DSLP-5 · P2 · Dead code: tools and debloat
-
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
-- **Effort:** M
 
 Bootstrap cache mutation at base `644c6ff72533b2a955d2116aa8d51583e7faabed`
 selected the same 75 `_wheel` and `_digest` identities in fresh before and
