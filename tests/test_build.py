@@ -22,6 +22,54 @@ class ProfileTests(unittest.TestCase):
             profile, _ = build.load_profile(name)
             self.assertTrue(profile["targets"])
 
+    def test_profile_admission_reports_nonobjects_and_unreadable_files(self):
+        build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=build.TMP_ROOT) as directory:
+            root = pathlib.Path(directory)
+            path = root / "profiles" / "tools.json"
+            path.parent.mkdir()
+            valid = {
+                "profile": "tools", "artifact": "tools", "license": "gpl",
+                "description": "vidéo locale",
+                "targets": {"x86_64-unknown-linux-musl": {"arch": "x86_64", "platform": "linux"}},
+            }
+            with mock.patch.object(build, "ROOT", root):
+                with self.assertRaisesRegex(SystemExit, "cannot read"):
+                    build.load_profile("tools")
+                for raw, diagnostic in (
+                    (b"[]", "must contain a profile object"),
+                    (b"null", "must contain a profile object"),
+                    (bytes([255]), "cannot read"),
+                    (b"{", "cannot read"),
+                    (json.dumps({**valid, "license": []}).encode(), "license must be one of"),
+                    (json.dumps({**valid, "profile": "different"}).encode(), "does not declare profile tools"),
+                    (json.dumps({**valid, "artifact": "unknown"}).encode(), "artifact must be one of"),
+                    (json.dumps({**valid, "targets": []}).encode(), "has no target scope"),
+                    (json.dumps({**valid, "targets": [valid["targets"]]}).encode(), "has no target scope"),
+                    (json.dumps({**valid, "targets": {}}).encode(), "has no target scope"),
+                    (json.dumps({**valid, "test_only": True, "artifact": "sdk", "targets": {
+                        "aarch64-apple-darwin": {"arch": "aarch64", "platform": "macos"},
+                    }}).encode(),
+                     "a test-only profile must use the tools artifact; a test-only profile builds only Linux targets"),
+                    (json.dumps({**valid, "targets": {"x86_64-unknown-linux-musl": None}}).encode(),
+                     "target x86_64-unknown-linux-musl must contain an object"),
+                ):
+                    with self.subTest(raw=raw), self.assertRaisesRegex(SystemExit, diagnostic):
+                        path.write_bytes(raw)
+                        build.load_profile("tools")
+                path.write_text(json.dumps(valid, ensure_ascii=False), encoding="utf-8")
+                parsed, origin = build.load_profile("tools")
+                self.assertEqual((parsed, origin), (valid, path))
+                target = "x86_64-unknown-linux-musl"
+                self.assertEqual(build.target_config(parsed, target), {"arch": "x86_64", "platform": "linux"})
+                with self.assertRaisesRegex(SystemExit, "^error: target unknown is not in profile tools$"):
+                    build.target_config(parsed, "unknown")
+                for field in ("arch", "platform"):
+                    for value in (7, ""):
+                        changed = {**valid, "targets": {target: {**valid["targets"][target], field: value}}}
+                        with self.subTest(field=field, value=value), self.assertRaisesRegex(SystemExit, f"target {target} lacks"):
+                            build.target_config(changed, target)
+
     def test_play_sdk_macos_components(self):
         profile, _ = build.load_profile("play-sdk")
         requested = build.requested_components(profile, "aarch64-apple-darwin")
@@ -45,6 +93,30 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(list(build.load_sources()), names)
         for source in raw["inputs"]:
             self.assertTrue("url" in source or "urls" in source, source["name"])
+
+    def test_source_lock_requires_package_fields_on_each_source(self):
+        build.TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=build.TMP_ROOT) as directory:
+            root = pathlib.Path(directory)
+            lock = root / "sources.lock.json"
+            original = json.loads((build.ROOT / "sources.lock.json").read_text())
+            with mock.patch.object(build, "ROOT", root):
+                lock.write_text("{")
+                with self.assertRaisesRegex(SystemExit, "^error: .*sources.lock.json"):
+                    build.load_sources()
+                for field in ("filename", "archive_root"):
+                    for omit in (True, False):
+                        changed = json.loads(json.dumps(original))
+                        entry = next(item for item in changed["inputs"] if item["name"] == "ffmpeg")
+                        if omit:
+                            del entry[field]
+                        else:
+                            entry[field] = ""
+                        lock.write_text(json.dumps(changed))
+                        with self.subTest(field=field, omit=omit), self.assertRaisesRegex(
+                            SystemExit, f"^error: source ffmpeg lacks {field}$",
+                        ):
+                            build.load_sources()
 
     def test_buildlib_pin_matches_the_lock(self):
         pyproject = tomllib.loads((build.ROOT / "pyproject.toml").read_text())
