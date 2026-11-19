@@ -198,6 +198,109 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(build.ABSOLUTE_BUILD_TREE.search(b"./.work/build/a.c"))
 
 
+class StageAuditPolicyTests(unittest.TestCase):
+    def test_merges_profile_and_target_components_with_stable_deduplication(self):
+        target = "x86_64-unknown-linux-musl"
+        config = {
+            "arch": "x86_64", "platform": "linux",
+            "components": {"subtitle_decoders": ["mov_text", "srt"], "decoders": ["av1", "aac"]},
+        }
+        profile = {
+            "profile": "runtime",
+            "components": {"decoders": ["av1", "mov_text"], "filters": [], "indevs": ["lavfi"]},
+            "targets": {target: config},
+        }
+        self.assertEqual(build.requested_components(profile, target), {
+            "decoders": ["av1", "mov_text", "aac", "srt"], "indevs": ["lavfi"],
+        })
+        self.assertEqual(build.requested_components({"profile": "sdk", "targets": {target: {
+            "arch": "x86_64", "platform": "linux",
+        }}}, target), {})
+        for components, message in (
+            ({"unknown": ["av1"]}, "unknown component category unknown"),
+            ({"filters": "not a list"}, "component category filters must be a list"),
+            ({"devices": ["alsa"]}, "producer profiles cannot request devices"),
+            ({"indevs": ["alsa"]}, "producer profiles may request only the ('lavfi',) input devices, not ['alsa']"),
+        ):
+            profile["components"] = components
+            with self.subTest(components=components), self.assertRaises(SystemExit) as error:
+                build.requested_components(profile, target)
+            self.assertEqual(str(error.exception), f"error: {message}")
+
+    def test_license_policy_reports_each_incompatible_setting(self):
+        config = "CONFIG_GPL=yes\nCONFIG_NONFREE=yes\nCONFIG_VERSION3=yes\n"
+        self.assertEqual(build.license_problems("lgpl", config), [
+            "CONFIG_NONFREE=yes", "CONFIG_VERSION3=yes", "CONFIG_GPL is yes for a lgpl profile",
+        ])
+        self.assertEqual(build.license_problems("gpl", "CONFIG_GPL=no\nCONFIG_NONFREE=no\n"), [
+            "CONFIG_GPL is off for a gpl profile",
+        ])
+        self.assertEqual(build.license_problems("gpl", "CONFIG_GPL=yes\n"), [])
+        self.assertEqual(build.license_problems("lgpl", "IGNORED_CONFIG_GPL=yes\nCONFIG_VERSION3=no\n"), [])
+
+    def test_audits_linux_compiler_flags_and_architecture_independently(self):
+        scratch = ROOT / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+            work = pathlib.Path(directory)
+            path = work / "config.h"
+            config = {"arch": "aarch64", "cpu_baseline": "armv8-a"}
+            path.write_text("#define ARCH_AARCH64 1\n", encoding="utf-8")
+            case = mock.Mock()
+            build.audit_linux_config(case, config, work, "CFLAGS=-march=armv8-a\nUNRELATED=-march=native\n")
+            self.assertEqual(case.call_args_list, [
+                mock.call("FFmpeg configured for aarch64", True),
+                mock.call("no host-specific CPU flags", True, ""),
+                mock.call("CPU baseline -march=armv8-a", True),
+            ])
+            path.write_text("#define ARCH_X86_64 1\n", encoding="utf-8")
+            case.reset_mock()
+            build.audit_linux_config(case, config, work, "CFLAGS=-mcpu=native -m64 -mavx2\n")
+            self.assertEqual(case.call_args_list, [
+                mock.call("FFmpeg configured for aarch64", False),
+                mock.call("no host-specific CPU flags", False,
+                          "host-specific -march/-mcpu/-mtune=native; x86 code-generation flag on aarch64"),
+                mock.call("CPU baseline -march=armv8-a", False),
+            ])
+        self.assertEqual(build.host_cpu_flag_problems("CFLAGS=-mcpu=native\nCXXFLAGS=-mavx2\n", "x86_64"),
+                         ["host-specific -march/-mcpu/-mtune=native"])
+
+    def test_pkg_config_recognizes_exact_library_names_and_linker_flags(self):
+        for declaration in (
+            "Requires: libva >= 2", "Requires.private:libva,libdrm", "Libs: -L/opt/sdk:a -lva", "Libs.private:\t-lva -lm",
+        ):
+            with self.subTest(declaration=declaration):
+                self.assertTrue(build.pc_declares(["Name: ignored", declaration], "libva"))
+        for declaration in (
+            "Name: libva", "Requires: libva-drm", "Requires: alibva", "Requires: libva_extra",
+            "Libs: -lva-drm", "Libs: X-lva", "Libs: -lva_extra",
+        ):
+            with self.subTest(declaration=declaration):
+                self.assertFalse(build.pc_declares([declaration], "libva"))
+
+    def test_native_object_kind_and_macos_loader_parsing(self):
+        for config, valid, wrong in (
+            ({"platform": "macos", "arch": "aarch64"}, "file: Mach-O 64-bit arm64 object", "file: ELF aarch64"),
+            ({"platform": "linux", "arch": "aarch64"}, "file: ELF 64-bit object, ARM aarch64", "file: ELF x86-64"),
+            ({"platform": "linux", "arch": "x86_64"}, "file: ELF 64-bit object, x86-64", "file: Mach-O 64-bit x86_64 object"),
+        ):
+            with self.subTest(config=config):
+                self.assertIsNone(build.object_kind_problem(config, valid))
+                self.assertEqual(build.object_kind_problem(config, wrong), wrong)
+                self.assertEqual(build.object_kind_problem(config, "file: LLVM IR BITCODE"), "LTO bitcode")
+        binary = pathlib.Path("/stage/bin/ffmpeg")
+        output = (
+            "/stage/bin/ffmpeg:\n"
+            "\t/System/Library/Frameworks/Media Support.framework/Media Support (compatibility version 1.0.0)\n"
+            "  \n\t@rpath/libavcodec.63.dylib (compatibility version 63.0.0)\n"
+        )
+        with mock.patch.object(build, "output", return_value=output) as invoke:
+            self.assertEqual(build.macos_linked_libraries(binary), [
+                "/System/Library/Frameworks/Media Support.framework/Media Support", "@rpath/libavcodec.63.dylib",
+            ])
+        invoke.assert_called_once_with(["otool", "-L", "/stage/bin/ffmpeg"])
+
+
 class ToolchainInputTests(unittest.TestCase):
     def setUp(self):
         scratch = ROOT / ".work/tmp"

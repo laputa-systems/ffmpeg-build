@@ -860,6 +860,31 @@ pytest 9.2.0 and one mutation worker. The functions are
 `finish_programs`, and `sign_libraries`. All 159 ordinary tests and
 both linters passed.
 
+The stage audit admission fixtures match profile component merges,
+review CPU flags and licenses, parse exact pkg-config library entries,
+and check native object types and loader paths. On macOS ARM64 at
+`32a0e84a`, 327 of the same 337 identities were caught, up from 252.
+
+The ten survivors have bounded outcomes. `requested_components`
+37–39 affect the final devices branch, after any nonempty devices
+entry has already been rejected. `pc_declares` 13 and 16 take the
+same prefix before the first colon. `audit_linux_config` 40 alters a
+separator outside the supported single-token CPU baselines, and 7
+aliases `config.h` on the case-folded volume. `macos_linked_libraries`
+12 and 15 get the same first split field. Variant 13 uses the last
+separator on an `otool -L` dependency line. The shipped names have
+no embedded version delimiters, so the producer's version suffix
+is the only delimiter in the native records.
+
+Use `tests/test_build.py`, mutmut 3.8.1, pytest 9.2.0 and the
+controller archive with one worker. Select `merged_components`,
+`requested_components`, `auto_selected`, `device_problems`,
+`license_files`, `notice_paths`, `development_link`,
+`host_cpu_flag_problems`, `pc_declares`, `license_problems`,
+`build_prefix_leaks`, `audit_linux_config`, `object_kind_problem`,
+and `macos_linked_libraries`. All 164 controller tests and both
+linters passed.
+
 ## Tickets
 
 
