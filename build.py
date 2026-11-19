@@ -1568,9 +1568,17 @@ def audit_tools(case, config, stage, version):
             continue
         result = subprocess.run([str(binary), "-hide_banner", "-version"], capture_output=True, text=True, check=False)
         first = result.stdout.splitlines()[0] if result.stdout else ""
-        case(f"{name} reports {version}", first.startswith(f"{name} version {version} "), f"found {first!r}")
-        buildconf = subprocess.run([str(binary), "-hide_banner", "-buildconf"], capture_output=True, text=True, check=False).stdout
-        case(f"{name} -buildconf has --disable-network", "--disable-network" in buildconf)
+        case(
+            f"{name} reports {version}",
+            result.returncode == 0 and first.startswith(f"{name} version {version} "),
+            f"exit {result.returncode}; found {first!r}",
+        )
+        buildconf = subprocess.run([str(binary), "-hide_banner", "-buildconf"], capture_output=True, text=True, check=False)
+        case(
+            f"{name} -buildconf has --disable-network",
+            buildconf.returncode == 0 and "--disable-network" in buildconf.stdout,
+            f"exit {buildconf.returncode}",
+        )
         data = binary.read_bytes()
         kind = output(["file", "-b", str(binary)])
         if config["platform"] == "macos":

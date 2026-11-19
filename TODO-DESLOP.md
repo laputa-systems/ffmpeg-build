@@ -633,6 +633,23 @@ with `build.x_audit_runtime__mutmut_*` and the same archive recipe as
 the tools selection. The 107 survivors remain in DSLP-4. All 128
 ordinary tests and both linters passed.
 
+The tools audit now requires successful exit status from both
+`-version` and `-buildconf`. The previous audit accepted both outputs
+from commands that exited 7. A staged shell fixture reproduces that
+false pass and verifies both failures after the fix. The suite also
+checks empty version output, both Apple audio encoder names, a missing
+bin directory, continued probing after the first program is absent,
+and the alternate static-link description.
+
+The current tools audit selection catches 214 of 240 identities with
+the same pinned archive recipe. Five variants preserve the decision:
+33 supplies another falsy value and 42, 46, 74 and 78 leave
+`subprocess.run` checking disabled. Variant 59 changes the displayed
+empty output. Variants 11, 14, 62, 65, 89, 92, 114, 117, 129, 132,
+145, 148, 160, 163, 190, 193, 205, 208, 236 and 239 remove optional
+diagnostic details. All 128 ordinary tests and both linters passed.
+The native repeat and wider audit scopes remain under DSLP-4.
+
 ## Tickets
 
 

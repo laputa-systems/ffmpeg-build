@@ -647,6 +647,13 @@ class StageTests(unittest.TestCase):
         macos = {"platform": "macos", "arch": "aarch64"}
         run_audit(linux, linux_inspection, [])
         run_audit(macos, macos_inspection, [])
+
+        def classic_static_inspection(arguments):
+            if arguments[:2] == ["file", "-b"]:
+                return "ELF 64-bit LSB executable, ARM aarch64, statically linked"
+            return linux_inspection(arguments)
+
+        run_audit(linux, classic_static_inspection, [])
         def incorrect_linux_inspection(arguments):
             match arguments:
                 case ["file", "-b", binary] if pathlib.Path(binary).name == "ffmpeg":
@@ -686,10 +693,35 @@ class StageTests(unittest.TestCase):
             "ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network",
             "ffmpeg is Mach-O arm64", "ffmpeg links only system libraries", "ffmpeg links no dynamic zlib",
         ])
+        ffmpeg.write_text(original.replace(";;", "; exit 7 ;;"), encoding="utf-8")
+        run_audit(linux, linux_inspection, ["ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network"])
+        ffmpeg.write_text(original.replace('printf "%s\\n" "ffmpeg version 9.0.2 fixture"', "exit 0"), encoding="utf-8")
+        run_audit(linux, linux_inspection, ["ffmpeg reports 9.0.2"])
         ffmpeg.write_text(original, encoding="utf-8")
+        for forbidden in ("aac_at", "audiotoolbox"):
+            with self.subTest(encoder=forbidden):
+                def encoder_inspection(arguments, encoder=forbidden):
+                    if arguments == [str(ffmpeg), "-hide_banner", "-encoders"]:
+                        return encoder
+                    return linux_inspection(arguments)
+
+                run_audit(linux, encoder_inspection, ["ffmpeg has no Apple encoders"])
         (self.stage / "include").mkdir()
+        (self.stage / "lib").mkdir()
+        ffmpeg.unlink()
+        ffprobe = binaries / "ffprobe"
+        ffprobe_script = ffprobe.read_text(encoding="utf-8")
+        ffprobe.write_text(ffprobe_script.replace("9.0.2", "9.0.1"), encoding="utf-8")
+        run_audit(linux, linux_inspection, [
+            "programs are ffmpeg and ffprobe", "no include/ in tools stage",
+            "no lib/ in tools stage", "ffmpeg present", "ffprobe reports 9.0.2",
+        ])
         (binaries / "ffprobe").unlink()
-        run_audit(linux, linux_inspection, ["programs are ffmpeg and ffprobe", "no include/ in tools stage", "ffprobe present"])
+        binaries.rmdir()
+        run_audit(linux, linux_inspection, [
+            "programs are ffmpeg and ffprobe", "no include/ in tools stage",
+            "no lib/ in tools stage", "ffmpeg present", "ffprobe present",
+        ])
 
     def test_runtime_audit_binds_stage_libraries_and_command_results(self):
         for platform, hwaccel in (("linux", "vaapi"), ("macos", "videotoolbox")):
