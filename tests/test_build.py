@@ -404,7 +404,9 @@ class StageTests(unittest.TestCase):
     def test_audit_reports_inconsistent_build_tree_and_stage(self):
         target = "aarch64-unknown-linux-musl"
         profile, path = build.load_profile("tools")
-        profile = profile | {"components": {"protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"]}}
+        profile = profile | {"components": {
+            "protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"], "subtitle_decoders": ["mov_text"],
+        }}
         config = build.target_config(profile, target)
         toolchain = {"cc": "fixture clang", "sysroot": "/", "cpu_baseline": config["cpu_baseline"], "libc": "musl 1.2.6"}
         build_root = pathlib.Path(self.temp.name) / "build"
@@ -412,7 +414,10 @@ class StageTests(unittest.TestCase):
         config_mak = ffmpeg / "ffbuild" / "config.mak"
         config_mak.parent.mkdir(parents=True)
         components = ffmpeg / "config_components.h"
-        good_components = "#define CONFIG_FILE_PROTOCOL 1\n#define CONFIG_LAVFI_INDEV 1\n#define CONFIG_AAC_ENCODER 1\n"
+        good_components = (
+            "#define CONFIG_FILE_PROTOCOL 1\n#define CONFIG_LAVFI_INDEV 1\n"
+            "#define CONFIG_AAC_ENCODER 1\n#define CONFIG_MOVTEXT_DECODER 1\n"
+        )
         (ffmpeg / "config.h").write_text("#define ARCH_AARCH64 1\n")
         effective_config = "--disable-network --enable-avdevice"
         good_config = (
@@ -424,14 +429,14 @@ class StageTests(unittest.TestCase):
             mock.patch.object(build, "STAGE_ROOT", self.stage),
             mock.patch.object(build, "BUILD_ROOT", build_root),
             mock.patch.object(build, "require_native_host"),
-            mock.patch.object(build, "platform_toolchain", return_value=toolchain),
+            mock.patch.object(build, "platform_toolchain", return_value=toolchain) as resolve_toolchain,
             mock.patch.object(build, "audit_tools") as audit_programs,
         ):
             manifest_file = self.write_package_stage(target, "e" * 40)
             stage, build_dir, deps = build.build_paths("tools", target)
             valid = json.loads(manifest_file.read_text()) | {
                 "contract": 1,
-                "components": {"protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"]},
+                "components": {"protocols": ["file"], "indevs": ["lavfi"], "encoders": ["aac"], "decoders": ["movtext"]},
                 "auto_selected": {},
                 "external_libraries": [],
                 "bundled_dependencies": config.get("bundled_dependencies", []),
@@ -446,8 +451,15 @@ class StageTests(unittest.TestCase):
             cases = (
                 (valid, good_config, good_components, []),
                 (wrong_commit, good_config, good_components, ["manifest producer commit"]),
+                ({key: value for key, value in valid.items() if key != "producer"},
+                 good_config, good_components, ["manifest producer commit"]),
+                (valid | {"producer": {}}, good_config, good_components, ["manifest producer commit"]),
                 (valid | {"toolchain": []}, good_config, good_components, ["manifest readable"]),
                 (valid | {"toolchain": toolchain | {"libc": None}}, good_config, good_components, ["manifest readable"]),
+                ({key: value for key, value in valid.items() if key != "toolchain"},
+                 good_config, good_components, ["manifest toolchain", "manifest libc is musl"]),
+                (valid | {"toolchain": {key: value for key, value in toolchain.items() if key != "libc"}},
+                 good_config, good_components, ["manifest libc is musl"]),
                 (valid | {"contract": 2}, good_config, good_components, ["manifest contract"]),
                 (valid | {"profile": "runtime"}, good_config, good_components, ["manifest profile and target"]),
                 (valid | {"target": "x86_64-unknown-linux-musl"}, good_config, good_components,
@@ -465,6 +477,7 @@ class StageTests(unittest.TestCase):
                  good_components, ["libavdevice only for requested input devices"]),
                 (valid | {"external_libraries": ["vorbis"]}, good_config + "CONFIG_LIBVORBIS=yes\n", good_components,
                  ["external libraries allowed"]),
+                (valid | {"external_libraries": ["dav1d"]}, good_config + "CONFIG_LIBDAV1D=yes\n", good_components, []),
                 (valid | {"components": valid["components"] | {"outdevs": ["null"]},
                           "auto_selected": {"outdevs": ["null"]}},
                  good_config, good_components + "#define CONFIG_NULL_OUTDEV 1\n", ["no devices or output devices"]),
@@ -474,6 +487,18 @@ class StageTests(unittest.TestCase):
                 (valid | {"components": valid["components"] | {"hwaccels": ["h264_vaapi"]},
                           "auto_selected": {"hwaccels": ["h264_vaapi"]}},
                  good_config, good_components + "#define CONFIG_H264_VAAPI_HWACCEL 1\n", ["no hardware decode"]),
+                (valid | {"components": valid["components"] | {"devices": ["null"]},
+                          "auto_selected": {"devices": ["null"]}},
+                 good_config, good_components + "#define CONFIG_NULL_DEVICE 1\n", ["no devices or output devices"]),
+                (valid | {"components": valid["components"] | {"muxers": ["mp4"]},
+                          "auto_selected": {"muxers": ["mp4"]}},
+                 good_config, good_components + "#define CONFIG_MP4_MUXER 1\n", ["no unrequested muxers"]),
+                (valid | {"components": valid["components"] | {"protocols": ["file", "pipe"]},
+                          "auto_selected": {"protocols": ["pipe"]}},
+                 good_config, good_components + "#define CONFIG_PIPE_PROTOCOL 1\n", ["protocols allowed"]),
+                (valid | {"components": {key: value for key, value in valid["components"].items() if key != "protocols"}},
+                 good_config, good_components.replace("#define CONFIG_FILE_PROTOCOL 1\n", ""),
+                 ["requested protocols present"]),
                 (valid, good_config, good_components.replace("CONFIG_AAC_ENCODER", "CONFIG_MP3_ENCODER"),
                  ["no unrequested encoders", "requested encoders present", "manifest components match build tree",
                   "manifest auto-selected match build tree"]),
@@ -506,6 +531,7 @@ class StageTests(unittest.TestCase):
                     result = [line.partition(": ")[2].split(": ", 1)[0] for line in stdout.getvalue().splitlines()
                               if line.startswith("FAIL audit: ")]
                     self.assertEqual(result, failures)
+                    self.assertTrue(callable(audit_programs.call_args.args[0]))
                     self.assertEqual(audit_programs.call_args.args[1:],
                                      (config, stage, build.load_sources()["ffmpeg"].version))
             manifest_file.write_text(json.dumps(valid))
@@ -523,6 +549,44 @@ class StageTests(unittest.TestCase):
                         [f"FAIL audit: README and licenses present: missing: {[relative]}"],
                     )
                     notice.write_bytes(content)
+            self.assertEqual(resolve_toolchain.call_args.args, (config,))
+
+            with (
+                mock.patch.object(build, "NETWORK_PROTOCOLS", {"file"}),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(build.audit(target, "tools"), 1, stdout.getvalue())
+            self.assertEqual(
+                [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["FAIL audit: no network protocols: network: ['file']"],
+            )
+
+            with redirect_stdout(io.StringIO()) as stdout:
+                (ffmpeg / "config.h").write_text("#define ARCH_X86_64 1\n")
+                (stage / "bin" / "ffmpeg").write_text(f"{build.ROOT}/fixture/object.o\n")
+                self.assertEqual(build.audit(target, "tools"), 1, stdout.getvalue())
+            self.assertEqual(
+                [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["FAIL audit: FFmpeg configured for aarch64",
+                 "FAIL audit: no absolute build prefix in artifact: files: ['bin/ffmpeg']"],
+            )
+            (ffmpeg / "config.h").write_text("#define ARCH_AARCH64 1\n")
+            (stage / "bin" / "ffmpeg").write_bytes(b"fixture")
+            optional = ("bundled_dependencies", "frameworks", "system_libraries", "external_libraries")
+            reduced_config = {key: value for key, value in config.items() if key not in optional}
+            reduced_profile = profile | {
+                "targets": profile["targets"] | {target: reduced_config},
+                "components": {key: value for key, value in profile["components"].items() if key != "protocols"},
+            }
+            with mock.patch.object(build, "load_profile", return_value=(reduced_profile, path)):
+                reduced_manifest = valid | {key: [] for key in optional} | {
+                    "components": {key: value for key, value in valid["components"].items() if key != "protocols"},
+                    "configure_args": build.configure_args_for(reduced_profile, target, build_dir, deps, toolchain),
+                }
+                manifest_file.write_text(json.dumps(reduced_manifest))
+                components.write_text(good_components.replace("#define CONFIG_FILE_PROTOCOL 1\n", ""))
+                with redirect_stdout(io.StringIO()) as stdout:
+                    self.assertEqual(build.audit(target, "tools"), 0, stdout.getvalue())
 
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
@@ -588,6 +652,7 @@ class StageTests(unittest.TestCase):
                         ["FAIL audit: shared libraries only"] if expected else [],
                     )
                     audit_runtime.assert_called_once()
+                    self.assertTrue(callable(audit_runtime.call_args.args[0]))
                     self.assertEqual(
                         audit_runtime.call_args.args[1:],
                         (config, stage, build.load_sources()["ffmpeg"].version, requested, components, manifest),
@@ -670,6 +735,7 @@ class StageTests(unittest.TestCase):
                         failures,
                     )
                     audit_sdk.assert_called_once()
+                    self.assertTrue(callable(audit_sdk.call_args.args[0]))
                     self.assertEqual(
                         audit_sdk.call_args.args[1:],
                         (target, "play-sdk", config, stage, build.load_sources()["ffmpeg"].version),
