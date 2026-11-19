@@ -511,6 +511,17 @@ The dispositions apply to `build.py` SHA-256
 and detail. The pipeline uses the resulting status. DSLP-4 retains
 the 129 other outcomes and the whole-change lane.
 
+Tools and runtime now exercise different hardware-decoding decisions
+with real build headers and matching manifests. The tools audit
+also rejects a compiled input device outside the profile and names
+an independently missing README or license from the staged tree.
+Use the same four-test selector at `e8bfddde`. Matching source spans
+and all 696 identities moved from 539 to 575 catches. No catches
+were lost. The new checks caught nine of the previously dispositioned
+diagnostic variants. Of the 121 survivors, 19 retain their diagnostic
+disposition and 102 still need review. All 121 ordinary tests, Ruff
+and ty passed.
+
 ## Tickets
 
 
