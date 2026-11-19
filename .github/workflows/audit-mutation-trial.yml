@@ -54,9 +54,7 @@ jobs:
             python -m mutmut run --max-children 1 "build.x_audit__mutmut_*"
           ' audit-proof "$proof"
           for part in meta spans; do
-            printf '%s ' "$part"
-            gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n'
-            printf '\n'
+            gzip -c "$proof/mutants/build.py.$part" | base64 | tr -d '\n' | fold -w 3000 | awk -v part="$part" '{print part, $0}'
           done
           uv run --frozen --python 3.15.2 python - "$proof" "$PWD/.work/buildlib/scripts" <<'PY'
           import sys
