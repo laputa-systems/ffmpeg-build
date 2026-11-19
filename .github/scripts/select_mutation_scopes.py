@@ -14,6 +14,7 @@ SCOPES = {
         "archive_member_problems", "extracted_library_problems", "package", "parse_stage_manifest", "qualify",
     }),
     "audit": frozenset({"audit"}),
+    "runtime": frozenset({"audit_runtime"}),
     "sdk": frozenset({"audit_sdk"}),
     "tools": frozenset({"audit_tools"}),
 }
