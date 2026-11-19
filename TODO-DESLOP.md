@@ -755,6 +755,9 @@ a missing-target default after profile target validation. Use the
 `read_json`, `load_sources`, `load_profile`,
 `profile_target_problems` and `target_config`. All 26 profile
 and source tests and lint passed.
+The native trial keeps the mutation generator in UTF-8. The profile
+fixture applies an ASCII default only when the actual read omits its
+explicit encoding.
 
 ## Tickets
 
