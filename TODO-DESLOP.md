@@ -667,6 +667,14 @@ FFmpeg metadata. The same SDK source and spans caught 239 of 288,
 ten more than the previous selection. All 128 ordinary tests and both
 linters passed. The 49 survivors remain in DSLP-4.
 
+Runtime version probes also now require successful exit status.
+The previous Linux and macOS fixture accepted a staged ffprobe that
+reported the expected version and exited 7. The audit records the
+exit status, version line and command error and fails the package.
+The current runtime coordinator selection catches 275 of 376 local
+identities. The three native results above describe the earlier
+373-identity source. All 128 ordinary tests and both linters passed.
+
 ## Tickets
 
 
