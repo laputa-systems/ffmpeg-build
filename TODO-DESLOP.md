@@ -10,7 +10,7 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 No performance workload or benchmark harness is established, so there is no
 bench entrypoint. The outcomes to measure are profile build time and resource
 cost, shipped archive and installed size, built-binary decode and encode
-throughput, and ffmpeg/ffprobe startup. Ranked gaps are DSLP-7 (P2, assumed:
+throughput, and ffmpeg/ffprobe startup. Ranked gaps are DSLP-7 (P3, assumed:
 user-visible media slowdown), DSLP-8 (P3: build cost), and DSLP-9 (P3: size
 and startup). None has a producer regression gate or comparable baseline.
 
@@ -1113,7 +1113,7 @@ observed on each of the three platforms.
 [Cache change](https://github.com/laputa-systems/ffmpeg-build/pull/75)
 
 ## Tickets
-### DSLP-7 · P2 · Measure shipped media throughput
+### DSLP-7 · P3 · Measure shipped media throughput
 
 - **Area:** Runtime performance
 - **Where:** tests/tools-workflows.sh:187; tests/encode-command.sh:45; tests/qualify-runtime.sh:78
