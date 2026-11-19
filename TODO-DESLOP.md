@@ -1,9 +1,33 @@
 Prefix: DSLP
-Next: 7
+Next: 10
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
 ## Report
+
+**Bench audit**
+
+No performance workload or benchmark harness is established, so there is no
+bench entrypoint. The outcomes to measure are profile build time and resource
+cost, shipped archive and installed size, built-binary decode and encode
+throughput, and ffmpeg/ffprobe startup. Ranked gaps are DSLP-7 (P2, assumed:
+user-visible media slowdown), DSLP-8 (P3: build cost), and DSLP-9 (P3: size
+and startup). None has a producer regression gate or comparable baseline.
+
+The profile build observations in `plan.md:81` describe iteration time on a
+busy host, including emulated Linux; they are not a native performance gate.
+The controller test timings below measure test-suite cost, not FFmpeg runtime.
+`docs/baseline.md` records historical Player sizes, not producer artifact
+sizes. `tests/tools-workflows.sh`, `tests/encode-command.sh` and the native
+qualification scripts check media output and compatibility, not throughput;
+the fixture encoder checks use one-second synthetic inputs. No sample count,
+interleaved comparison, host gate or performance budget is attached to these
+checks. They cannot attribute regressions across the build process tree or
+media execution: start with separate CPU sampling and peak-memory measurement,
+and add I/O counters where build cost needs explanation. Instrumented runs
+must be separate from timed comparisons. The future workload needs pinned inputs,
+artifact and host identity, completed-work checks and cleanup validation before
+its numbers can support a gate.
 
 Ground (DSLP-1) passed on macOS ARM64 at base `539141d40ffecd42c1eada9abaea1475927a7cf0`; PR #7 merged as `689ca3a595450d1840f9812a3e5384559fc28b01` with test and lint checks successful. [Verification](AGENTS.md#verification) records costs, contracts, consumers and gaps.
 
@@ -1089,3 +1113,31 @@ observed on each of the three platforms.
 [Cache change](https://github.com/laputa-systems/ffmpeg-build/pull/75)
 
 ## Tickets
+### DSLP-7 · P2 · Measure shipped media throughput
+
+- **Area:** Runtime performance
+- **Where:** tests/tools-workflows.sh:187; tests/encode-command.sh:45; tests/qualify-runtime.sh:78
+- **Problem:** Unproven: qualification checks output but has no representative timed decode or encode workload, so a user-visible playback or transcoding slowdown could ship unseen. There is no paired baseline, resource attribution, or host-validity record.
+- **Recommendation:** Establish target-specific shipped-profile decode and encode workloads with pinned media, completed-work and correctness checks, paired baselines, and separate CPU and memory attribution.
+- **Fix with:** bench-pyramid
+- **Effort:** L
+
+
+### DSLP-8 · P3 · Measure profile build cost
+
+- **Area:** Build performance
+- **Where:** plan.md:81; Makefile:30
+- **Problem:** Historical profile build timings were taken on a busy host and include emulation for Linux; they do not establish repeatable native build time, CPU, memory or I/O baselines per target.
+- **Recommendation:** Define repeatable clean and warm profile builds with input and host identity, completed artifacts, paired comparisons and separate process-tree resource attribution.
+- **Fix with:** bench-pyramid
+- **Effort:** M
+
+
+### DSLP-9 · P3 · Track shipped artifact size and startup
+
+- **Area:** Artifact performance
+- **Where:** docs/baseline.md:32; Makefile:36; tests/tools-workflows.sh:108
+- **Problem:** The historical size figures describe Player, not current producer archives; qualification checks program version but does not measure shipped binary startup. Changes to size or startup have no producer baseline or regression check.
+- **Recommendation:** Measure profile archive and installed sizes and target-specific ffmpeg and ffprobe startup against comparable artifacts; record the inputs and distinguish cold and warm startup.
+- **Fix with:** bench-pyramid
+- **Effort:** M

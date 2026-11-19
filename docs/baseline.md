@@ -2,6 +2,11 @@
 
 Evidence captured at the S0 checkpoint on 2026-11-04 from this host and checkout. This is a comparison point, not a history log.
 
+No producer performance benchmark is established. The figures below describe
+Player artifacts, not current FFmpeg producer artifacts; they do not gate build
+time, producer size, media throughput, or startup. The ranked measurement gaps
+are recorded in `TODO-DESLOP.md` under Bench audit.
+
 ## Checkouts
 
 ```sh
