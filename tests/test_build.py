@@ -783,13 +783,19 @@ class StageTests(unittest.TestCase):
                 case _:
                     self.fail(f"unexpected inspection: {arguments}")
 
+        version_exits = {}
+
         def version(arguments, **kwargs):
             binary, *flags = arguments
             path = pathlib.Path(binary)
             self.assertEqual(path.parent, binaries)
             self.assertEqual(flags, ["-hide_banner", "-version"])
             self.assertEqual(kwargs, {"capture_output": True, "text": True, "check": False})
-            return subprocess.CompletedProcess(arguments, 0, stdout=f"{path.name} version 9.0.2 fixture\n", stderr="")
+            status = version_exits.get(path.name, 0)
+            return subprocess.CompletedProcess(
+                arguments, status, stdout=f"{path.name} version 9.0.2 fixture\n",
+                stderr="fixture command failure" if status else "",
+            )
 
         config = {"platform": platform, "arch": "aarch64"}
         with (
@@ -808,6 +814,18 @@ class StageTests(unittest.TestCase):
                 mock.call(audit.case, config, path, role, set(identities.values()))
                 for path, role in objects.items()
             ])
+
+            version_exits["ffprobe"] = 7
+            audit = build.Audit()
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
+                self.assertEqual(audit.finish(), 1, stdout.getvalue())
+            failures = [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")]
+            self.assertEqual(failures, [
+                ("FAIL audit: ffprobe runs from the stage and reports 9.0.2: exit 7; "
+                 "found 'ffprobe version 9.0.2 fixture' fixture command failure"),
+            ])
+            version_exits.clear()
 
             (stage / "include" / "zlib.h").write_bytes(b"bundled header")
             util = stage / entries["libavutil"]["file"]
