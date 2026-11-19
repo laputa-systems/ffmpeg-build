@@ -468,6 +468,12 @@ class StageTests(unittest.TestCase):
                 (valid | {"components": valid["components"] | {"outdevs": ["null"]},
                           "auto_selected": {"outdevs": ["null"]}},
                  good_config, good_components + "#define CONFIG_NULL_OUTDEV 1\n", ["no devices or output devices"]),
+                (valid | {"components": valid["components"] | {"indevs": ["lavfi", "v4l2"]},
+                          "auto_selected": {"indevs": ["v4l2"]}},
+                 good_config, good_components + "#define CONFIG_V4L2_INDEV 1\n", ["input devices limited to ['lavfi']"]),
+                (valid | {"components": valid["components"] | {"hwaccels": ["h264_vaapi"]},
+                          "auto_selected": {"hwaccels": ["h264_vaapi"]}},
+                 good_config, good_components + "#define CONFIG_H264_VAAPI_HWACCEL 1\n", ["no hardware decode"]),
                 (valid, good_config, good_components.replace("CONFIG_AAC_ENCODER", "CONFIG_MP3_ENCODER"),
                  ["no unrequested encoders", "requested encoders present", "manifest components match build tree",
                   "manifest auto-selected match build tree"]),
@@ -502,6 +508,21 @@ class StageTests(unittest.TestCase):
                     self.assertEqual(result, failures)
                     self.assertEqual(audit_programs.call_args.args[1:],
                                      (config, stage, build.load_sources()["ffmpeg"].version))
+            manifest_file.write_text(json.dumps(valid))
+            config_mak.write_text(good_config)
+            components.write_text(good_components)
+            paths = build.notice_paths(profile)
+            for relative in (paths[0], paths[-1]):
+                with self.subTest(missing=relative), redirect_stdout(io.StringIO()) as stdout:
+                    notice = stage / relative
+                    content = notice.read_bytes()
+                    notice.unlink()
+                    self.assertEqual(build.audit(target, "tools"), 1, stdout.getvalue())
+                    self.assertEqual(
+                        [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                        [f"FAIL audit: README and licenses present: missing: {[relative]}"],
+                    )
+                    notice.write_bytes(content)
 
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
@@ -571,6 +592,24 @@ class StageTests(unittest.TestCase):
                         audit_runtime.call_args.args[1:],
                         (config, stage, build.load_sources()["ffmpeg"].version, requested, components, manifest),
                     )
+            config_mak.write_text(config_text + "CONFIG_SHARED=yes\n")
+            header = ffmpeg / "config_components.h"
+            header.write_text(header.read_text() + "#define CONFIG_MPEG2_VAAPI_HWACCEL 1\n")
+            expanded = components | {"hwaccels": sorted([*components["hwaccels"], "mpeg2_vaapi"])}
+            actual_manifest = manifest | {"components": expanded, "auto_selected": {"hwaccels": ["mpeg2_vaapi"]}}
+            manifest_file.write_text(json.dumps(actual_manifest))
+            audit_runtime.reset_mock()
+            with redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(build.audit(target, "runtime"), 1, stdout.getvalue())
+            self.assertEqual(
+                [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["FAIL audit: no unrequested hwaccels: hwaccels: ['mpeg2_vaapi']"],
+            )
+            audit_runtime.assert_called_once()
+            self.assertEqual(
+                audit_runtime.call_args.args[1:],
+                (config, stage, build.load_sources()["ffmpeg"].version, requested, expanded, actual_manifest),
+            )
 
     def test_audit_sdk_rejects_effective_encoders_and_muxers(self):
         target = "aarch64-apple-darwin"
