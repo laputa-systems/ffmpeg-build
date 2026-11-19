@@ -488,6 +488,15 @@
     },
     "total": 293
   },
+  "runtime-inspection": {
+    "source_sha256": "00ec3cdf736012a1abb31665d7bf9896647e4774a056fdf88398373ebfd1b7cb",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": []
+    },
+    "total": 230
+  },
   "sdk": {
     "source_sha256": "b551dae7fe24f5cf7897c98acb3481281b3432a277e7f1320345cc1614d08db8",
     "survivors": {
@@ -598,6 +607,17 @@
       ]
     },
     "total": 288
+  },
+  "sources": {
+    "source_sha256": "e4e6193066f8b5df1f277cb4a1d455749b6a35e13936cf63ab7b5f6d505d16d3",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": [
+        "build.x_extract_source__mutmut_14=35d248634f0768cc38f2ea2497c33b17a1a02379bb37e03d371485813d10600c"
+      ]
+    },
+    "total": 52
   },
   "stage-admission": {
     "source_sha256": "cff70b937b6a324dc3e8e7483f2772b2d6ce2f7db2c88920bf5fee5c9037cc36",

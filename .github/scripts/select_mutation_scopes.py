@@ -23,8 +23,13 @@ SCOPES = {
     }),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
+    "runtime-inspection": frozenset({
+        "elf_dynamic", "gnu_stack_size", "library_identity_name", "library_layout",
+        "macho_load_commands", "versioned_library_pattern",
+    }),
     "sdk": frozenset({"audit_sdk"}),
     "stage-admission": frozenset({"mismatched_source_pins", "parse_archive_name", "read_manifest", "stage_complete"}),
+    "sources": frozenset({"extract_source", "fetch_profile_sources", "fetch_source"}),
     "tools": frozenset({"audit_tools"}),
 }
 
