@@ -727,6 +727,17 @@ identities move from 46 to 230 caught on macOS ARM64. Reuse the
 DSLP-4, including dependency and runtime-stage branches outside
 this tools fixture.
 
+
+The build fixture also runs the real stage shaping for Linux and macOS
+runtime and the macOS playback SDK. It verifies runtime symlinks,
+role-specific Linux linker responses, configuration and manifest
+handoffs, and removal of static link flags only from runtime pkg-config
+files. A matching stamp over an incomplete stage still triggers rebuild.
+
+The same 336 build identities now catch 317 on macOS ARM64.
+The 19 remaining outcomes include case-only names, parsed stamp
+formatting, and diagnostics. Native confirmation remains in DSLP-4.
+
 ## Tickets
 
 
