@@ -307,6 +307,24 @@
     },
     "total": 155
   },
+  "configure": {
+    "source_sha256": "e26b0ca65b08826084c977611183e5e0ed38f2a3f9c9ec4eaf9fa8854f913ed8",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_configure_args_for__mutmut_112=46c37e5dd625286f4dbfeccff695eab561cebdbe748eec392280b15f00a2e224",
+        "build.x_configure_args_for__mutmut_113=d39da5e7326101acca1e416735a0aba1a3669a43f811190c11d4ca32d3974d09"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_configure_args_for__mutmut_112=46c37e5dd625286f4dbfeccff695eab561cebdbe748eec392280b15f00a2e224",
+        "build.x_configure_args_for__mutmut_113=d39da5e7326101acca1e416735a0aba1a3669a43f811190c11d4ca32d3974d09"
+      ],
+      "xcode-27": [
+        "build.x_configure_args_for__mutmut_112=46c37e5dd625286f4dbfeccff695eab561cebdbe748eec392280b15f00a2e224",
+        "build.x_configure_args_for__mutmut_113=d39da5e7326101acca1e416735a0aba1a3669a43f811190c11d4ca32d3974d09"
+      ]
+    },
+    "total": 356
+  },
   "dispatch": {
     "source_sha256": "54b4ff8ae5399e9298e8667bd46860eec0bc2ade18f76a55392908ae7736cf5b",
     "survivors": {
@@ -689,6 +707,31 @@
       "xcode-27": []
     },
     "total": 150
+  },
+  "toolchain": {
+    "source_sha256": "279b6772ab624f7ccb34e4b2b237a568f7e903d2f5a781f96510d5ff7613d912",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_musl_version__mutmut_5=863331f15dd101a06be640c2a71abf9385f75bebe9bfca4b964f124919eea304",
+        "build.x_musl_version__mutmut_9=bb0d27ce96213954e4f7e02bcdb2a663dcc04759dd6a020b6676f55d2084e6e7",
+        "build.x_require_native_host__mutmut_2=cdf594083a3b30decb1c93be5e9c0dd6a614bab8e23fe94872fa56dc73d0eed4"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_musl_version__mutmut_5=863331f15dd101a06be640c2a71abf9385f75bebe9bfca4b964f124919eea304",
+        "build.x_musl_version__mutmut_9=bb0d27ce96213954e4f7e02bcdb2a663dcc04759dd6a020b6676f55d2084e6e7",
+        "build.x_require_native_host__mutmut_2=cdf594083a3b30decb1c93be5e9c0dd6a614bab8e23fe94872fa56dc73d0eed4"
+      ],
+      "xcode-27": [
+        "build.x_build_fingerprint__mutmut_10=78a927e2349e71f4fdefaa2e432366bdf05c1f940755dfba73422be959803998",
+        "build.x_build_fingerprint__mutmut_4=20582275c6a36040688da8d385b41bd4b45fd78c0006b5922059501b0ed515db",
+        "build.x_build_fingerprint__mutmut_7=41ac4aa89d5f1064ca6df49f4a2bd11b715fddfc952e969a693c486d103a206d",
+        "build.x_musl_version__mutmut_11=e45461835c30fddf0fadad26d81f8f011645e39c31bcf2b20297823ed606cc88",
+        "build.x_musl_version__mutmut_5=863331f15dd101a06be640c2a71abf9385f75bebe9bfca4b964f124919eea304",
+        "build.x_musl_version__mutmut_9=bb0d27ce96213954e4f7e02bcdb2a663dcc04759dd6a020b6676f55d2084e6e7",
+        "build.x_require_native_host__mutmut_2=cdf594083a3b30decb1c93be5e9c0dd6a614bab8e23fe94872fa56dc73d0eed4"
+      ]
+    },
+    "total": 186
   },
   "tools": {
     "source_sha256": "f48f6e95a039c4a1a4854169456bd717592922dcd9305d5f2a2c018065569e77",

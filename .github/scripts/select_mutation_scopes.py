@@ -17,6 +17,10 @@ SCOPES = {
     "bootstrap": frozenset({"_digest", "_wheel"}),
     "build": frozenset({"build"}),
     "collector": frozenset({"archive_commit", "assemble", "check_manifest", "expected_assets", "expected_stems", "main"}),
+    "configure": frozenset({
+        "component_problems", "configure_args_for", "parse_components", "parse_config_mak",
+        "parse_configuration", "parse_external_libraries",
+    }),
     "dispatch": frozenset({"main"}),
     "profile-admission": frozenset({
         "load_profile", "load_sources", "profile_target_problems", "read_json", "target_config",
@@ -38,6 +42,7 @@ SCOPES = {
         "identity_key", "library_identity", "library_link_names", "resolve_link", "runtime_libraries_manifest",
         "sibling_name", "stage_links", "stage_tree", "symlink_problems",
     }),
+    "toolchain": frozenset({"build_fingerprint", "musl_version", "platform_toolchain", "require_native_host"}),
     "tools": frozenset({"audit_tools"}),
 }
 
