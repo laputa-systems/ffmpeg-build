@@ -18,6 +18,9 @@ SCOPES = {
     "build": frozenset({"build"}),
     "collector": frozenset({"archive_commit", "assemble", "check_manifest", "expected_assets", "expected_stems", "main"}),
     "dispatch": frozenset({"main"}),
+    "profile-admission": frozenset({
+        "load_profile", "load_sources", "profile_target_problems", "read_json", "target_config",
+    }),
     "runtime": frozenset({"audit_runtime"}),
     "runtime-binary": frozenset({"audit_runtime_elf", "audit_runtime_macho"}),
     "sdk": frozenset({"audit_sdk"}),

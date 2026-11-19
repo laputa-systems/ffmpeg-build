@@ -325,6 +325,27 @@
     },
     "total": 104
   },
+  "profile-admission": {
+    "source_sha256": "82bcd0be709e289a884f7986a744dd936a93be32479972f8d471c174c5513a49",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_profile_target_problems__mutmut_18=200400468db83c1cb20e72f76078c5bb024e5dd6372f2ad2c1d11e46d3157782",
+        "build.x_profile_target_problems__mutmut_20=f1c89852e362f456e7e02012f4819619191e94ee143d0b64386d3926e9cdfc2d",
+        "build.x_read_json__mutmut_4=69d8a3bc2eb201e5f28ae00cac507c91ae471fa9108f3fac2e85e1c40974ad99"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_profile_target_problems__mutmut_18=200400468db83c1cb20e72f76078c5bb024e5dd6372f2ad2c1d11e46d3157782",
+        "build.x_profile_target_problems__mutmut_20=f1c89852e362f456e7e02012f4819619191e94ee143d0b64386d3926e9cdfc2d",
+        "build.x_read_json__mutmut_4=69d8a3bc2eb201e5f28ae00cac507c91ae471fa9108f3fac2e85e1c40974ad99"
+      ],
+      "xcode-27": [
+        "build.x_profile_target_problems__mutmut_18=200400468db83c1cb20e72f76078c5bb024e5dd6372f2ad2c1d11e46d3157782",
+        "build.x_profile_target_problems__mutmut_20=f1c89852e362f456e7e02012f4819619191e94ee143d0b64386d3926e9cdfc2d",
+        "build.x_read_json__mutmut_4=69d8a3bc2eb201e5f28ae00cac507c91ae471fa9108f3fac2e85e1c40974ad99"
+      ]
+    },
+    "total": 119
+  },
   "runtime": {
     "source_sha256": "e8da96df97e5985fe9812ca7a8801f36816a071c530948c371141bfce08e0bb4",
     "survivors": {
