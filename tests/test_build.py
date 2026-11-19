@@ -514,6 +514,70 @@ class StageTests(unittest.TestCase):
                         (config, stage, build.load_sources()["ffmpeg"].version, requested, components, manifest),
                     )
 
+    def test_audit_sdk_rejects_effective_encoders_and_muxers(self):
+        target = "aarch64-apple-darwin"
+        profile, profile_path = build.load_profile("play-sdk")
+        profile = profile | {"components": {"protocols": ["file"]}}
+        config = build.target_config(profile, target)
+        toolchain = {"cc": "fixture clang", "sysroot": "/", "cpu_baseline": config["cpu_baseline"]}
+        build_root = pathlib.Path(self.temp.name) / "build"
+        with (
+            mock.patch.object(build, "load_profile", return_value=(profile, profile_path)),
+            mock.patch.object(build, "STAGE_ROOT", self.stage),
+            mock.patch.object(build, "BUILD_ROOT", build_root),
+            mock.patch.object(build, "require_native_host"),
+            mock.patch.object(build, "platform_toolchain", return_value=toolchain),
+            mock.patch.object(build, "audit_sdk") as audit_sdk,
+        ):
+            stage, build_dir, deps = build.build_paths("play-sdk", target)
+            ffmpeg = build_dir / "ffmpeg"
+            config_mak = ffmpeg / "ffbuild" / "config.mak"
+            config_mak.parent.mkdir(parents=True)
+            configuration = "--disable-network"
+            config_mak.write_text(f"FFMPEG_CONFIGURATION={configuration}\nCONFIG_ZLIB=yes\nCFLAGS=-fPIC\n")
+            header = (
+                "#define CONFIG_FILE_PROTOCOL 1\n"
+                "#define CONFIG_H264_VIDEOTOOLBOX_HWACCEL 1\n"
+                "#define CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL 1\n"
+            )
+            components = {"protocols": ["file"], "hwaccels": ["h264_videotoolbox", "hevc_videotoolbox"]}
+            manifest_file = self.write_package_stage(target, "e" * 40, "play-sdk")
+            manifest = json.loads(manifest_file.read_text()) | {
+                "contract": 1,
+                "external_libraries": [],
+                "bundled_dependencies": config.get("bundled_dependencies", []),
+                "frameworks": config.get("frameworks", []),
+                "system_libraries": config.get("system_libraries", []),
+                "toolchain": toolchain,
+                "configure_args": build.configure_args_for(profile, target, build_dir, deps, toolchain),
+                "configure": configuration,
+                "license": "LGPL version 2.1 or later",
+            }
+            cases = (
+                ("", {}, []),
+                ("#define CONFIG_AAC_ENCODER 1\n", {"encoders": ["aac"]}, ["no encoders"]),
+                ("#define CONFIG_MP4_MUXER 1\n", {"muxers": ["mp4"]}, ["no muxers"]),
+            )
+            for extra_header, extra_components, failures in cases:
+                with self.subTest(extra_components=extra_components), redirect_stdout(io.StringIO()) as stdout:
+                    audit_sdk.reset_mock()
+                    (ffmpeg / "config_components.h").write_text(header + extra_header)
+                    manifest_file.write_text(json.dumps(manifest | {
+                        "components": components | extra_components,
+                        "auto_selected": extra_components,
+                    }))
+                    self.assertEqual(build.audit(target, "play-sdk"), int(bool(failures)), stdout.getvalue())
+                    self.assertEqual(
+                        [line.partition(": ")[2].split(": ", 1)[0] for line in stdout.getvalue().splitlines()
+                         if line.startswith("FAIL audit: ")],
+                        failures,
+                    )
+                    audit_sdk.assert_called_once()
+                    self.assertEqual(
+                        audit_sdk.call_args.args[1:],
+                        (target, "play-sdk", config, stage, build.load_sources()["ffmpeg"].version),
+                    )
+
     def test_package_reports_archive_error_for_a_symlinked_stage(self):
         target = "aarch64-apple-darwin"
         stage = self.write_package_stage(target, "e" * 40).parents[2]

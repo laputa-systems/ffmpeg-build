@@ -449,6 +449,21 @@ same archive recipe above. Select
 and `build.x_audit__mutmut_*`. The remaining 259 survivors stay in
 DSLP-4. All 119 ordinary tests, Ruff and ty passed.
 
+The SDK audit fixture now reads the macOS build-tree header with
+the target's VideoToolbox accelerators. The matching manifest
+continues through the SDK audit handoff. Adding an effective
+encoder or muxer independently changes the expected audit status
+and identifies the forbidden component class. The fixture doubles
+the final binary inspection. The native artifact receipts record
+the real SDK checks.
+
+The unchanged `audit` selection at `1fb8b5fe` caught 470 of 696
+identities using the preceding recipe and adding
+`audit_sdk_rejects_effective` to the pytest selector. The preceding
+437-catch result used the two existing build-tree fixtures. All
+120 ordinary tests, Ruff and ty passed. The remaining 226 outcomes
+are under DSLP-4.
+
 ## Tickets
 
 
