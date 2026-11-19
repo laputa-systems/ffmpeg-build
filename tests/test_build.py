@@ -597,6 +597,100 @@ class StageTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()) as stdout:
                     self.assertEqual(build.audit(target, "tools"), 0, stdout.getvalue())
 
+    def test_tools_audit_requires_both_programs_and_the_native_binary_contract(self):
+        binaries = self.stage / "bin"
+        binaries.mkdir(parents=True)
+        for name in ("ffmpeg", "ffprobe"):
+            binary = binaries / name
+            binary.write_text(
+                "#!/bin/sh\n"
+                'case "$1:$2" in\n'
+                f'  -hide_banner:-version) printf "%s\\n" "{name} version 9.0.2 fixture" ;;\n'
+                '  -hide_banner:-buildconf) printf "%s\\n" "--disable-network" ;;\n'
+                "  *) exit 1 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            binary.chmod(0o755)
+
+        def run_audit(config, inspection, expected_failures):
+            with mock.patch.object(build, "output", side_effect=inspection), redirect_stdout(io.StringIO()) as stdout:
+                audit = build.Audit()
+                build.audit_tools(audit.case, config, self.stage, "9.0.2")
+                self.assertEqual(audit.finish(), int(bool(expected_failures)), stdout.getvalue())
+            self.assertEqual(
+                [line.split(": ", 2)[1] for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                expected_failures,
+            )
+
+        def linux_inspection(arguments):
+            match arguments:
+                case ["file", "-b", _]:
+                    return "ELF 64-bit LSB pie executable, ARM aarch64, static-pie linked"
+                case ["readelf", "-lW", _]:
+                    return "GNU_STACK 0x000000 0x000000 0x000000 0x000000 0x200000 RW 0x10"
+                case ["readelf", "-dW", _] | [_, "-hide_banner", "-encoders"]:
+                    return ""
+                case _:
+                    self.fail(f"unexpected inspection: {arguments}")
+
+        def macos_inspection(arguments):
+            match arguments:
+                case ["file", "-b", _]:
+                    return "Mach-O 64-bit executable arm64"
+                case ["otool", "-L", binary]:
+                    return f"{binary}:\n /usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
+                case _:
+                    self.fail(f"unexpected inspection: {arguments}")
+
+        linux = {"platform": "linux", "arch": "aarch64"}
+        macos = {"platform": "macos", "arch": "aarch64"}
+        run_audit(linux, linux_inspection, [])
+        run_audit(macos, macos_inspection, [])
+        def incorrect_linux_inspection(arguments):
+            match arguments:
+                case ["file", "-b", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "ELF 64-bit LSB pie executable, x86-64, dynamically linked"
+                case ["readelf", "-lW", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "INTERP\nGNU_STACK 0x0 0x0 0x0 0x0 0x100000 RW 0x10"
+                case ["readelf", "-dW", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "0x0000000000000001 (NEEDED) Shared library: [libc.so.6]"
+                case [binary, "-hide_banner", "-encoders"] if pathlib.Path(binary).name == "ffmpeg":
+                    return "V..... h264_videotoolbox"
+                case _:
+                    return linux_inspection(arguments)
+
+        def incorrect_macos_inspection(arguments):
+            match arguments:
+                case ["file", "-b", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return "Mach-O 64-bit executable x86_64"
+                case ["otool", "-L", binary] if pathlib.Path(binary).name == "ffmpeg":
+                    return f"{binary}:\n /opt/local/lib/libz.1.dylib (compatibility version 1.0.0)\n"
+                case _:
+                    return macos_inspection(arguments)
+
+        ffmpeg = binaries / "ffmpeg"
+        original = ffmpeg.read_text(encoding="utf-8")
+        ffmpeg.write_text(
+            original.replace("9.0.2", "9.0.1").replace("--disable-network", "--enable-network")
+            + "# GLIBC_2.17\n",
+            encoding="utf-8",
+        )
+        run_audit(linux, incorrect_linux_inspection, [
+            "ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network",
+            "ffmpeg is ARM aarch64 ELF", "ffmpeg is statically linked", "ffmpeg has no INTERP",
+            "ffmpeg thread stack is 2097152 B", "ffmpeg has no NEEDED",
+            "ffmpeg has no glibc symbol versions", "ffmpeg has no Apple encoders",
+        ])
+        run_audit(macos, incorrect_macos_inspection, [
+            "ffmpeg reports 9.0.2", "ffmpeg -buildconf has --disable-network",
+            "ffmpeg is Mach-O arm64", "ffmpeg links only system libraries", "ffmpeg links no dynamic zlib",
+        ])
+        ffmpeg.write_text(original, encoding="utf-8")
+        (self.stage / "include").mkdir()
+        (binaries / "ffprobe").unlink()
+        run_audit(linux, linux_inspection, ["programs are ffmpeg and ffprobe", "no include/ in tools stage", "ffprobe present"])
+
     def test_audit_runtime_checks_shared_configuration_and_dispatches_to_runtime(self):
         target = "aarch64-unknown-linux-musl"
         profile, profile_path = build.load_profile("runtime")
