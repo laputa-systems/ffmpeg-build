@@ -619,6 +619,20 @@ Reproduce with the SDK archive recipe and
 `build.x_audit_tools__mutmut_*`. The 38 survivors remain in DSLP-4.
 All 127 ordinary tests and both linters passed.
 
+The staged runtime audit now reads seven versioned libraries, their
+links and headers, and the corresponding pkg-config and manifest data.
+The coordinator uses the appropriate binary inspector for each program
+and library. The rejected stages change a library digest, add a bundled
+header, and alter the reported protocols and encoders. The case covers
+Linux and macOS inspection output. The specialized native inspectors
+keep their separate direct checks.
+
+The current runtime coordinator selection caught 266 of 373 identities.
+The earlier selection found no tests for these identities. Reproduce
+with `build.x_audit_runtime__mutmut_*` and the same archive recipe as
+the tools selection. The 107 survivors remain in DSLP-4. All 128
+ordinary tests and both linters passed.
+
 ## Tickets
 
 
