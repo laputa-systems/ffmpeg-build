@@ -475,6 +475,17 @@ identities moved from 470 to 502 catches. All previous catches held.
 Reproduce with the same three-test selector above. All 120 ordinary
 tests, Ruff and ty passed. DSLP-4 retains the 194 remaining outcomes.
 
+The tools build-tree fixture now checks missing zlib, PIC and GPL
+configuration separately. It also checks the libavdevice flag,
+an unexpected external library and a compiled output device. The
+stage manifest matches the relevant build-tree observations so the
+test identifies each check at the audit boundary.
+
+The same 696 identities at `5b5dc0302456dee8c0f089cebe5548b3cc90b086`
+moved from 502 to 531 catches with no lost catches. Use the same
+three-test selector and archive recipe above. All 120 ordinary tests,
+Ruff and ty passed. DSLP-4 retains the 165 remaining outcomes.
+
 ## Tickets
 
 
