@@ -708,6 +708,45 @@
     },
     "total": 150
   },
+  "stage-provenance": {
+    "source_sha256": "36ab18625b889ca257b9cd5fa96570567e6c8edd0aab6e933a718bfb0703f50b",
+    "survivors": {
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": [
+        "build.x_parse_license__mutmut_11=8e7d519177e510eff149f6b94266a37ca0d42ef4b835163078082b27e1b3aa76"
+      ]
+    },
+    "total": 246
+  },
+  "stage-transforms": {
+    "source_sha256": "5f139bfea3eb2511cd162106397263975f035098eb3c627c6675f3d7b863ee93",
+    "survivors": {
+      "ubuntu-26.04": [
+        "build.x_prune_stage__mutmut_14=da463f68d9e711772b5e34aca201a771f56af2d7bed1d11f868a22368ed181ec"
+      ],
+      "ubuntu-26.04-arm": [
+        "build.x_prune_stage__mutmut_14=da463f68d9e711772b5e34aca201a771f56af2d7bed1d11f868a22368ed181ec"
+      ],
+      "xcode-27": [
+        "build.x_drop_static_link_flags__mutmut_6=33ab0873df799aa178aacc560ced4a738574ea09aa620df3e53f270d809ccda4",
+        "build.x_drop_static_link_flags__mutmut_8=9194004aff98b0500dc0cd9af9c27d778990045099940cbd39652a9e0c3c20bd",
+        "build.x_normalize_pc__mutmut_5=c75e1baa25b17ced2cf3ff31f9288bdcf58dfe124652b5b6c03c45ab706f74df",
+        "build.x_normalize_pc__mutmut_7=38d51234f01ba4ca7af3ec0efb1104421484d8ea076c84b6daa6472fb91f85fd",
+        "build.x_prune_stage__mutmut_14=da463f68d9e711772b5e34aca201a771f56af2d7bed1d11f868a22368ed181ec",
+        "build.x_prune_stage__mutmut_17=3a1c4c2e6b52a5a34133dc43a8dfbf1e0446a470d8b82c1c70c17907a439b1cd",
+        "build.x_prune_stage__mutmut_23=f2a8049911a55d7bafba14271186c9643ea3ceea05ca406c926fde3b702b8c9f",
+        "build.x_prune_stage__mutmut_27=e85b346ed342013d2211e51e8b95cc63396d061dc27e6fe90118073d4848c73f",
+        "build.x_prune_stage__mutmut_29=99403030e3813c88d6f2e04f6515783052db9c53ba8c7b5bcf190b5444d6c593",
+        "build.x_prune_stage__mutmut_3=fd7ccc8db22e80271e022af27611b56134587e120bc4d48ab6c03be3ae212b5c",
+        "build.x_prune_stage__mutmut_38=b5f5b8c507c89fde020d50f8881083575541f18924d376a5827c0c741f1d084b",
+        "build.x_prune_stage__mutmut_5=30fcdb373541aea70383f98c8f1b828f992e7185ba4749fa5a84143ec99bf172",
+        "build.x_prune_stage__mutmut_7=b31f568034360819348677b51945326a643946541aa3f91dc3a6a6c2e0e623a8",
+        "build.x_prune_stage__mutmut_9=1580e11a9f4143d0ed8f804b0daa1c636e15517bfd3c9cdb04b421f3bcef971f"
+      ]
+    },
+    "total": 179
+  },
   "toolchain": {
     "source_sha256": "279b6772ab624f7ccb34e4b2b237a568f7e903d2f5a781f96510d5ff7613d912",
     "survivors": {

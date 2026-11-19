@@ -42,6 +42,12 @@ SCOPES = {
         "identity_key", "library_identity", "library_link_names", "resolve_link", "runtime_libraries_manifest",
         "sibling_name", "stage_links", "stage_tree", "symlink_problems",
     }),
+    "stage-provenance": frozenset({
+        "git_commit", "install_notices", "manifest_for", "parse_license", "write_manifest",
+    }),
+    "stage-transforms": frozenset({
+        "drop_static_link_flags", "finish_programs", "normalize_pc", "prune_stage", "sign_libraries",
+    }),
     "toolchain": frozenset({"build_fingerprint", "musl_version", "platform_toolchain", "require_native_host"}),
     "tools": frozenset({"audit_tools"}),
 }
