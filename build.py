@@ -158,8 +158,8 @@ def fail(message) -> NoReturn:
 
 def read_json(path):
     try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         fail(f"cannot read {path}: {exc}")
 
 
@@ -221,15 +221,21 @@ LINKER_RESPONSE_FILES = {"program": "ld-program.rsp", "library": "ld-library.rsp
 def load_profile(name):
     path = ROOT / "profiles" / f"{name}.json"
     profile = read_json(path)
+    if not isinstance(profile, dict):
+        fail(f"{path} must contain a profile object")
     if profile.get("profile") != name:
         fail(f"{path} does not declare profile {name}")
     if profile.get("artifact") not in ARTIFACTS:
         fail(f"{path} artifact must be one of {ARTIFACTS}")
-    if profile.get("license") not in FFMPEG_LICENSES:
+    license_name = profile.get("license")
+    if not isinstance(license_name, str) or license_name not in FFMPEG_LICENSES:
         fail(f"{path} license must be one of {sorted(FFMPEG_LICENSES)}")
     scope = profile.get("targets")
     if not isinstance(scope, dict) or not scope:
         fail(f"{path} has no target scope")
+    for target, config in scope.items():
+        if not isinstance(config, dict):
+            fail(f"{path} target {target} must contain an object")
     problems = profile_target_problems(profile)
     if problems:
         fail(f"{path}: " + "; ".join(problems))
@@ -254,9 +260,11 @@ def target_config(profile, target):
     if target not in profile["targets"]:
         fail(f"target {target} is not in profile {profile['profile']}")
     config = profile["targets"][target]
-    if not config.get("platform"):
+    platform_name = config.get("platform")
+    if not isinstance(platform_name, str) or not platform_name:
         fail(f"target {target} lacks a platform")
-    if not config.get("arch"):
+    architecture = config.get("arch")
+    if not isinstance(architecture, str) or not architecture:
         fail(f"target {target} lacks an architecture")
     return config
 

@@ -738,6 +738,24 @@ The same 336 build identities now catch 317 on macOS ARM64.
 The 19 remaining outcomes include case-only names, parsed stamp
 formatting, and diagnostics. Native confirmation remains in DSLP-4.
 
+
+**Profile and source admission**
+
+The profile loader now rejects non-object roots and target entries,
+unreadable UTF-8, unhashable licenses and invalid target fields at
+the controller boundary. The fixtures keep the valid UTF-8
+description, exercise the two combined test-only diagnostics, and
+verify that every source entry carries its package fields.
+
+The five-function selection caught 116 of 119 on macOS ARM64 with
+`LC_ALL=C PYTHONCOERCECLOCALE=0 PYTHONUTF8=0 PYTHONIOENCODING=utf-8`.
+The three remaining variants use the UTF-8 encoding alias or change
+a missing-target default after profile target validation. Use the
+`build.py` archive recipe with `tests/test_build.py` and select
+`read_json`, `load_sources`, `load_profile`,
+`profile_target_problems` and `target_config`. All 26 profile
+and source tests and lint passed.
+
 ## Tickets
 
 
