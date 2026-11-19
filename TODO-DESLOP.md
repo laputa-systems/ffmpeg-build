@@ -837,6 +837,29 @@ pytest 9.2.0, one mutation worker, and `configure_args_for`,
 `parse_configuration`, and `component_problems`.
 All 152 controller tests and linters passed.
 
+The stage synthesis fixtures verify the complete build manifest
+against a generated configuration and the pinned source lock, retain
+the exact notice paths and bytes for each artifact type, and check
+platform-specific strip and signing commands. They exercise real stage
+pruning and relocatable pkg-config output. The packaged native runs
+above exercise the real binaries and toolchain.
+
+At `29a4cbd2`, the matching macOS ARM64 trials caught 109 of 411
+stage-synthesis identities before and 396 of 411 with the fixtures.
+The separately added `git_commit` selection caught all 14. The only
+equivalent survivor is `prune_stage` 14, which assigns into the freshly
+created empty file list instead of extending it. The other 14
+survivors alias case-folded paths: `normalize_pc` 5 and 7,
+`drop_static_link_flags` 6 and 8, `prune_stage` 3, 5, 7, 9, 17, 23,
+27, 29 and 38, and `parse_license` 11.
+
+Use the controller archive with `tests/test_build.py`, mutmut 3.8.1,
+pytest 9.2.0 and one mutation worker. The functions are
+`manifest_for`, `write_manifest`, `git_commit`, `parse_license`,
+`install_notices`, `prune_stage`, `normalize_pc`, `drop_static_link_flags`,
+`finish_programs`, and `sign_libraries`. All 159 ordinary tests and
+both linters passed.
+
 ## Tickets
 
 
