@@ -84,20 +84,25 @@ def changed_scopes(path: str, before: bytes, after: bytes) -> set[str]:
     unqualified = changed - set().union(*eligible.values())
     if unqualified:
         raise ValueError(f"build functions need mutation qualification: {sorted(unqualified)}")
-    return {scope for scope, members in eligible.items() if members & changed}
+    return {scope for scope, members in eligible.items() if members & changed} if changed else set(eligible)
 
 
 def select(changes: Mapping[str, str], sources: Mapping[str, tuple[bytes, bytes]]) -> list[str]:
     selected: set[str] = set()
-    for path, status in changes.items():
+    for path, status in sorted(changes.items()):
         if status not in {"A", "D", "M"}:
             raise ValueError(f"unsupported change status {status}: {path}")
+        if path.endswith(".md"):
+            print(f"{status} {path} documentation", file=sys.stderr)
+            continue
         if path in sources:
-            selected.update(changed_scopes(path, *sources[path]))
+            scopes = changed_scopes(path, *sources[path])
         elif path in CONFIGURATION or path.startswith(INPUT_DIRECTORIES):
-            selected.update(SCOPES)
-        elif not path.endswith(".md"):
+            scopes = set(SCOPES)
+        else:
             raise ValueError(f"unclassified mutation input: {path}")
+        print(f"{status} {path} selects {', '.join(sorted(scopes))}", file=sys.stderr)
+        selected.update(scopes)
     return sorted(selected)
 
 
