@@ -783,13 +783,19 @@ class StageTests(unittest.TestCase):
                 case _:
                     self.fail(f"unexpected inspection: {arguments}")
 
+        version_exits = {}
+
         def version(arguments, **kwargs):
             binary, *flags = arguments
             path = pathlib.Path(binary)
             self.assertEqual(path.parent, binaries)
             self.assertEqual(flags, ["-hide_banner", "-version"])
             self.assertEqual(kwargs, {"capture_output": True, "text": True, "check": False})
-            return subprocess.CompletedProcess(arguments, 0, stdout=f"{path.name} version 9.0.2 fixture\n", stderr="")
+            status = version_exits.get(path.name, 0)
+            return subprocess.CompletedProcess(
+                arguments, status, stdout=f"{path.name} version 9.0.2 fixture\n",
+                stderr="fixture command failure" if status else "",
+            )
 
         config = {"platform": platform, "arch": "aarch64"}
         with (
@@ -808,6 +814,18 @@ class StageTests(unittest.TestCase):
                 mock.call(audit.case, config, path, role, set(identities.values()))
                 for path, role in objects.items()
             ])
+
+            version_exits["ffprobe"] = 7
+            audit = build.Audit()
+            with redirect_stdout(io.StringIO()) as stdout:
+                build.audit_runtime(audit.case, config, stage, "9.0.2", {"encoders": ["aac"]}, {"protocols": ["file"]}, {"libraries": entries})
+                self.assertEqual(audit.finish(), 1, stdout.getvalue())
+            failures = [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")]
+            self.assertEqual(failures, [
+                ("FAIL audit: ffprobe runs from the stage and reports 9.0.2: exit 7; "
+                 "found 'ffprobe version 9.0.2 fixture' fixture command failure"),
+            ])
+            version_exits.clear()
 
             (stage / "include" / "zlib.h").write_bytes(b"bundled header")
             util = stage / entries["libavutil"]["file"]
@@ -1011,6 +1029,7 @@ class StageTests(unittest.TestCase):
         stale = previous / "obsolete.o"
         stale.write_bytes(b"discarded")
         object_kind = "ELF 64-bit LSB relocatable, ARM aarch64"
+        builder_root = pathlib.Path(self.temp.name) / "separate-builder-root"
 
         def run_fixture(arguments, **options):
             if arguments[0] == "ar":
@@ -1028,10 +1047,12 @@ class StageTests(unittest.TestCase):
             self.assertEqual(arguments[:2], ["file", "-b"])
             self.assertEqual([pathlib.Path(path).name for path in arguments[2:]], ["first.o", "second.obj"])
             self.assertTrue(options["capture"])
+            self.assertTrue(options["quiet"])
             return subprocess.CompletedProcess(arguments, 0, stdout=f"{object_kind}\n{object_kind}\n")
 
         with (
             mock.patch.object(build, "TMP_ROOT", scratch),
+            mock.patch.object(build, "ROOT", builder_root),
             mock.patch.object(build, "run", side_effect=run_fixture),
         ):
             with redirect_stdout(io.StringIO()) as stdout:
@@ -1040,6 +1061,30 @@ class StageTests(unittest.TestCase):
                 self.assertEqual(check.finish(), 0, stdout.getvalue())
             self.assertEqual(list(scratch.iterdir()), [])
 
+            for leaked in (stage, builder_root):
+                with self.subTest(leaked=leaked), redirect_stdout(io.StringIO()) as stdout:
+                    pc.write_text(
+                        f"prefix=${{pcfiledir}}/../..\nLibs.private: -lva -lva-drm\nCflags: -I{leaked}\n",
+                        encoding="utf-8",
+                    )
+                    check = build.Audit()
+                    build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                    self.assertEqual(check.finish(), 1, stdout.getvalue())
+                    self.assertEqual(
+                        [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                        ["FAIL audit: libavutil.pc relocatable: prefix='prefix=${pcfiledir}/../..' leaked=True"],
+                    )
+
+            pc.write_text("Libs.private: -lva -lva-drm\n", encoding="utf-8")
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 1, stdout.getvalue())
+            self.assertEqual(
+                [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["FAIL audit: libavutil.pc relocatable: prefix='' leaked=False"],
+            )
+
             version_file.write_text("#define OTHER_VERSION 1\n")
             (stage / "bin").mkdir()
             (stage / "bin" / "ffprobe").write_bytes(b"unexpected program")
@@ -1047,6 +1092,10 @@ class StageTests(unittest.TestCase):
             archives[0].write_bytes(b"fixture GLIBC_ symbol version")
             archives[2].unlink()
             pc.write_text(f"prefix={stage}\nLibs.private: -lva\n")
+            (pc.parent / "unrelated.pc").write_text(
+                "prefix=${pcfiledir}/../..\nLibs.private: -lva-drm\n",
+                encoding="utf-8",
+            )
             object_kind = "LLVM bitcode"
             with redirect_stdout(io.StringIO()) as stdout:
                 check = build.Audit()
@@ -1078,7 +1127,7 @@ class StageTests(unittest.TestCase):
     def test_audit_sdk_rejects_an_archive_without_objects(self):
         scratch = pathlib.Path(self.temp.name) / "fresh" / "objects"
         target = "aarch64-unknown-linux-musl"
-        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted"]}
+        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted", "zlib"]}
         profile = "play-sdk"
         archive = self.stage / "lib" / "libempty.a"
         archive.parent.mkdir(parents=True)
@@ -1101,6 +1150,7 @@ class StageTests(unittest.TestCase):
             self.assertEqual(check.finish(), 1, stdout.getvalue())
         tool.assert_called_once()
         self.assertIn("FAIL audit: bundled dependency unlisted: unknown bundled dependency", stdout.getvalue())
+        self.assertIn("FAIL audit: bundled zlib archive", stdout.getvalue())
         self.assertIn("FAIL audit: archives contain object code, not bitcode: libempty.a: no objects", stdout.getvalue())
         self.assertEqual(list(scratch.iterdir()), [])
 

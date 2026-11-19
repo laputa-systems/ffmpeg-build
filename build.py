@@ -1956,7 +1956,11 @@ def audit_runtime(case, config, stage, version, requested, resolved, manifest):
             continue
         result = subprocess.run([str(binary), "-hide_banner", "-version"], capture_output=True, text=True, check=False)
         first = result.stdout.splitlines()[0] if result.stdout else ""
-        case(f"{name} runs from the stage and reports {version}", first.startswith(f"{name} version {version} "), f"found {first!r} {result.stderr.strip()[:200]}")
+        case(
+            f"{name} runs from the stage and reports {version}",
+            result.returncode == 0 and first.startswith(f"{name} version {version} "),
+            f"exit {result.returncode}; found {first!r} {result.stderr.strip()[:200]}",
+        )
     ffmpeg = bin_dir / "ffmpeg"
     if ffmpeg.is_file():
         buildconf = output([str(ffmpeg), "-hide_banner", "-buildconf"])

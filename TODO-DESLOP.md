@@ -650,6 +650,41 @@ empty output. Variants 11, 14, 62, 65, 89, 92, 114, 117, 129, 132,
 diagnostic details. All 128 ordinary tests and both linters passed.
 The native repeat and wider audit scopes remain under DSLP-4.
 
+The hosted repeat at `4ec9793bad1e72117908de96d28cebbaa374c46e`
+checked 240 tools and 373 runtime-coordinator identities on Linux
+x86-64, Linux ARM64 and macOS ARM64. All three caught the same 214 tools
+identities. The runtime selection caught 276 on both Linux architectures
+and 266 on macOS. Ten path-case variants account for the difference:
+24, 26, 28, 30, 32, 34, 36, 54, 111 and 113. All other runtime
+outcomes match. The 97 shared runtime survivors remain in DSLP-4.
+Use the chunked receipt procedure from the main audit proof.
+[Native specialized audit repeat](https://github.com/laputa-systems/ffmpeg-build/actions/runs/44448102415)
+
+The SDK fixture now checks leaked staging and builder paths separately
+with a valid relocatable pkg-config prefix. An unrelated .pc file can
+no longer satisfy the test's check for required dependencies from the
+FFmpeg metadata. The same SDK source and spans caught 239 of 288,
+ten more than the previous selection. All 128 ordinary tests and both
+linters passed. The 49 survivors remain in DSLP-4.
+
+Runtime version probes also now require successful exit status.
+The previous Linux and macOS fixture accepted a staged ffprobe that
+reported the expected version and exited 7. The audit records the
+exit status, version line and command error and fails the package.
+The current runtime coordinator selection catches 275 of 376 local
+identities. The three native results above describe the earlier
+373-identity source. All 128 ordinary tests and both linters passed.
+
+SDK admission now diagnoses a missing pkg-config prefix and continues
+checking bundled archives after an unknown dependency. The matched
+macOS selection catches 243 of 288 identities, four more than the
+preceding selection. Variants 6, 8, 10, 34, 39, 51, 53, 55, 57, 59,
+61, 63, 65, 104, 111, 113, 261 and 263 change path case. The native
+Linux repeat checks those paths. Variants 31 and 88 preserve falsy
+defaults. Variant 199 stops object inspection after an archive has
+already caused rejection. The remaining 24 variants change displayed
+audit details. All 128 ordinary tests and both linters passed.
+
 ## Tickets
 
 
