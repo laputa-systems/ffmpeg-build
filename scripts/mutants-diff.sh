@@ -18,7 +18,7 @@ scratch=$(mktemp -d "$PWD/.work/tmp/mutation-buildlib.XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 export TMPDIR="$PWD/.work/tmp"
 git -C "$2" archive "$(< .github/mutation-buildlib-revision)" scripts/mutants_gate.py | tar -x -C "$scratch"
-scopes=$(uv run --frozen --python 3.15.2 python .github/scripts/select_mutation_scopes.py --lines --scope "$3" "$1" "$scratch/scripts")
+scopes=$(uv run --frozen --no-sync --python 3.15.2 python .github/scripts/select_mutation_scopes.py --lines --scope "$3" "$1" "$scratch/scripts")
 if [[ -z $scopes ]]; then
   printf '%s\n' 'No changed mutation scopes.'
   exit 0

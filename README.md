@@ -50,4 +50,5 @@ base branch and the pinned Buildlib revision before running it. Set
 `MUTATION_BASE` to compare with another revision and `MUTATION_BUILDLIB` to use
 a different local Buildlib checkout. Set `MUTATION_SCOPE` to rerun one scope
 selected for the change. The hosted gate runs the same target on all three
-hosts.
+hosts. Preparation warms each host's locked package cache and shares one
+verified Buildlib wheel across the mutation archives.
