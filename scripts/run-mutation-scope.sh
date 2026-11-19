@@ -5,7 +5,8 @@ root="$PWD"
 mkdir -p .work/tmp
 proof=$(mktemp -d "$root/.work/tmp/whole-change.XXXXXXXX")
 mkdir -p "$proof/.work/cache/sources" "$proof/.work/tmp"
-touch "$proof/.work/cache/sources/.keep"
+wheel=$(uv run --frozen --no-sync --python 3.15.2 python -c 'from bootstrap import _wheel; print(_wheel())')
+cp "$wheel" "$proof/.work/cache/sources/"
 export TMPDIR="$proof/.work/tmp" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 git archive HEAD | tar -x -C "$proof"
 uv run --frozen --python 3.15.2 bash -euc '
