@@ -396,25 +396,13 @@
     "total": 119
   },
   "profile-resolution": {
-    "source_sha256": "7c93f522d2fb6a1e54a26cc17380ffe320e70d5a60326e86f335975a161736ac",
+    "source_sha256": "82b39636915e5826a321c25848bc147ce9ea59e3ffb98dbd589ccc568f0bc6ee",
     "survivors": {
-      "ubuntu-26.04": [
-        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
-        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
-        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
-      ],
-      "ubuntu-26.04-arm": [
-        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
-        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
-        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
-      ],
-      "xcode-27": [
-        "build.x_requested_components__mutmut_37=3ed181993f428418c324895118e00e3aed292a2faa31088e9da4611f867f9aef",
-        "build.x_requested_components__mutmut_38=188ecf14dd1f2cd4fba1057897cd75aa931ab6343001d7d00bd9b7cd36ab2ef8",
-        "build.x_requested_components__mutmut_39=36935e78243eb0cdc5423aaccf120eaa4207424ffcaa39493683db00871c1182"
-      ]
+      "ubuntu-26.04": [],
+      "ubuntu-26.04-arm": [],
+      "xcode-27": []
     },
-    "total": 134
+    "total": 130
   },
   "runtime": {
     "source_sha256": "e8da96df97e5985fe9812ca7a8801f36816a071c530948c371141bfce08e0bb4",
