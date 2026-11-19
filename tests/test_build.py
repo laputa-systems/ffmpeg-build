@@ -1075,6 +1075,16 @@ class StageTests(unittest.TestCase):
                         ["FAIL audit: libavutil.pc relocatable: prefix='prefix=${pcfiledir}/../..' leaked=True"],
                     )
 
+            pc.write_text("Libs.private: -lva -lva-drm\n", encoding="utf-8")
+            with redirect_stdout(io.StringIO()) as stdout:
+                check = build.Audit()
+                build.audit_sdk(check.case, target, profile_name, config, stage, version)
+                self.assertEqual(check.finish(), 1, stdout.getvalue())
+            self.assertEqual(
+                [line for line in stdout.getvalue().splitlines() if line.startswith("FAIL audit: ")],
+                ["FAIL audit: libavutil.pc relocatable: prefix='' leaked=False"],
+            )
+
             version_file.write_text("#define OTHER_VERSION 1\n")
             (stage / "bin").mkdir()
             (stage / "bin" / "ffprobe").write_bytes(b"unexpected program")
@@ -1117,7 +1127,7 @@ class StageTests(unittest.TestCase):
     def test_audit_sdk_rejects_an_archive_without_objects(self):
         scratch = pathlib.Path(self.temp.name) / "fresh" / "objects"
         target = "aarch64-unknown-linux-musl"
-        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted"]}
+        config = {"platform": "linux", "arch": "aarch64", "bundled_dependencies": ["unlisted", "zlib"]}
         profile = "play-sdk"
         archive = self.stage / "lib" / "libempty.a"
         archive.parent.mkdir(parents=True)
@@ -1140,6 +1150,7 @@ class StageTests(unittest.TestCase):
             self.assertEqual(check.finish(), 1, stdout.getvalue())
         tool.assert_called_once()
         self.assertIn("FAIL audit: bundled dependency unlisted: unknown bundled dependency", stdout.getvalue())
+        self.assertIn("FAIL audit: bundled zlib archive", stdout.getvalue())
         self.assertIn("FAIL audit: archives contain object code, not bitcode: libempty.a: no objects", stdout.getvalue())
         self.assertEqual(list(scratch.iterdir()), [])
 
