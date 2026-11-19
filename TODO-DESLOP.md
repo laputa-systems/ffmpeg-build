@@ -608,6 +608,17 @@ With unchanged source and matching spans, the same 288-identity selection
 catches 229, up from 214. The 59 survivors remain under DSLP-4. All 126
 ordinary tests and both linters passed.
 
+The tools audit now runs two staged command fixtures and consumes
+recorded Linux and macOS inspection output. A second inspection of
+the same commands rejects a stale version, network support, incompatible
+binary formats and linkage. The missing-program case also rejects a
+tools stage with developer headers. With the same 232 tool-audit
+identities and spans, the valid and missing-program cases caught 149.
+The additional negative inspections caught 45 more, for 194 of 232.
+Reproduce with the SDK archive recipe and
+`build.x_audit_tools__mutmut_*`. The 38 survivors remain in DSLP-4.
+All 127 ordinary tests and both linters passed.
+
 ## Tickets
 
 
