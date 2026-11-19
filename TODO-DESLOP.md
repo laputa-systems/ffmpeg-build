@@ -675,6 +675,16 @@ The current runtime coordinator selection catches 275 of 376 local
 identities. The three native results above describe the earlier
 373-identity source. All 128 ordinary tests and both linters passed.
 
+SDK admission now diagnoses a missing pkg-config prefix and continues
+checking bundled archives after an unknown dependency. The matched
+macOS selection catches 243 of 288 identities, four more than the
+preceding selection. Variants 6, 8, 10, 34, 39, 51, 53, 55, 57, 59,
+61, 63, 65, 104, 111, 113, 261 and 263 change path case. The native
+Linux repeat checks those paths. Variants 31 and 88 preserve falsy
+defaults. Variant 199 stops object inspection after an archive has
+already caused rejection. The remaining 24 variants change displayed
+audit details. All 128 ordinary tests and both linters passed.
+
 ## Tickets
 
 
