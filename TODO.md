@@ -1,5 +1,5 @@
 Prefix: FFB
-Next: 3
+Next: 6
 
 ### FFB-1 · P3 · tools and runtime cannot encode WebP thumbnails
 
@@ -18,4 +18,31 @@ Next: 3
 - **Recommendation:** Add a Chromium-facing profile (or extend runtime) that tracks the FFmpeg revision a pinned Chromium release names in DEPS (chromium/third_party/ffmpeg), built shared for aarch64- and x86_64-unknown-linux-musl with the headers and pkg-config files Chromium's use_system_ffmpeg build reads, and limited to the decoders, demuxers and parsers Chromium's Chrome branding enables (media/ffmpeg/ffmpeg_common.cc and third_party/ffmpeg/chromium/config/Chrome/linux). Prove it by building chromium-build's chromium-wayland-release profile with system FFmpeg against the release, and record the codec list difference from Chromium's bundled config. chromium-build would then switch its desktop line to system FFmpeg and ship the libav*/libsw* closure in its runtime.
 - **Fix with:** none
 - **Effort:** L
+
+### FFB-3 · P3 · Measure shipped media throughput
+
+- **Area:** Runtime performance
+- **Where:** tests/tools-workflows.sh:187; tests/encode-command.sh:45; tests/qualify-runtime.sh:78
+- **Problem:** Unproven: qualification checks output but has no representative timed decode or encode workload, so a user-visible playback or transcoding slowdown could ship unseen. There is no paired baseline, resource attribution, or host-validity record.
+- **Recommendation:** Establish target-specific shipped-profile decode and encode workloads with pinned media, completed-work and correctness checks, paired baselines, and separate CPU and memory attribution.
+- **Fix with:** bench-pyramid
+- **Effort:** L
+
+### FFB-4 · P3 · Measure profile build cost
+
+- **Area:** Build performance
+- **Where:** plan.md:81; Makefile:30
+- **Problem:** Historical profile build timings were taken on a busy host and include emulation for Linux; they do not establish repeatable native build time, CPU, memory or I/O baselines per target.
+- **Recommendation:** Define repeatable clean and warm profile builds with input and host identity, completed artifacts, paired comparisons and separate process-tree resource attribution.
+- **Fix with:** bench-pyramid
+- **Effort:** M
+
+### FFB-5 · P3 · Track shipped artifact size and startup
+
+- **Area:** Artifact performance
+- **Where:** docs/baseline.md:32; Makefile:36; tests/tools-workflows.sh:108
+- **Problem:** The historical size figures describe Player, not current producer archives; qualification checks program version but does not measure shipped binary startup. Changes to size or startup have no producer baseline or regression check.
+- **Recommendation:** Measure profile archive and installed sizes and target-specific ffmpeg and ffprobe startup against comparable artifacts; record the inputs and distinguish cold and warm startup.
+- **Fix with:** bench-pyramid
+- **Effort:** M
 
