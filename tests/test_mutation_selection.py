@@ -34,6 +34,10 @@ class MutationSelectionTests(unittest.TestCase):
             self.assertEqual(selection.select({"README.md": "M", "tests/README.md": "A"}, {}), [])
         self.assertEqual(log.getvalue().splitlines(), ["M README.md documentation", "A tests/README.md documentation"])
 
+    def test_the_vendored_bootstrap_selects_every_scope(self):
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(selection.select({"bootstrap/buildlib-run": "M"}, {}), sorted(selection.SCOPES))
+
     def test_unknown_functions_and_module_bindings_fail_selection(self):
         old = b"def unclassified():\n    return 0\n"
         with self.assertRaisesRegex(ValueError, "unclassified"):
