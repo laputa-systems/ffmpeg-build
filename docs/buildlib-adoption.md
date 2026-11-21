@@ -7,7 +7,8 @@ audit of the remaining local implementations, the vendored interpreter bootstrap
 changed, and the plan's per-repository proof. Base revision:
 `5d46fd52671c853f65069fd939612e2d728bb573`. The code change is
 `0783e876f9aa4f1d981d587048f7a68c264c598d`; the cold capsules below ran from a clean clone of
-that commit. Later commits to this file are documentation only.
+the final lane tip `e8a7757ef6d8a0a66e4772eb8e1b6ae5f440596f`, which differs from the code
+commit only in this documentation.
 
 ## 1. Bound the change
 
@@ -152,7 +153,7 @@ unchanged because the release code was not touched.
 
 macOS arm64 (native, Apple Silicon), from the lane commit:
 
-| Gate | Base `5d46fd5` | Lane `0783e876` |
+| Gate | Base `5d46fd5` | Lane `e8a7757e` |
 | --- | --- | --- |
 | `make lint` | exit 0, Ruff and ty clean | exit 0, Ruff and ty clean |
 | `make test` | exit 0, 168 tests, 14.965 s | exit 0, 173 tests, 7.1 s |
@@ -172,8 +173,8 @@ path so the worktree's `.git` file resolves), then `sh scripts/setup-dev`, `make
 
 | Capsule | Branch (selected) | Interpreter | setup | lint | test | status lines | cold total |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `ubuntu:24.04` arm64 | uv fallback (musl 1.2.4 is below 1.2.5) | uv-managed CPython 3.15.2 | 0 | 0 | 0 (173 tests) | 0 | 46 s |
-| `ubuntu:26.04` arm64 + distro `musl` | python-build (musl 1.2.5) | pinned musl CPython 3.15.1 | 0 | 0 | 0 (173 tests) | 0 | 26 s |
+| `ubuntu:24.04` arm64 | uv fallback (musl 1.2.4 is below 1.2.5) | uv-managed CPython 3.15.2 | 0 | 0 | 0 (173 tests) | 0 | 39 s |
+| `ubuntu:26.04` arm64 + distro `musl` | python-build (musl 1.2.5) | pinned musl CPython 3.15.1 | 0 | 0 | 0 (173 tests) | 0 | 34 s |
 
 `git status --porcelain` was empty in both clones. The cold total includes the one prerequisite
 installed before cloning (`git`), distribution package installation in setup, the pinned `uv`, the
@@ -202,7 +203,7 @@ distribution default.
   25,193-byte wheel. Development tools add about 23 MiB of Ruff/ty wheels once.
 - Warm cost: `sh bootstrap/buildlib-run -- -c pass` is 0.2-2.0 s with a populated cache (it
   re-hashes the pinned wheel, no download). `make test` took 7.05-7.28 s clean warm on macOS (173
-  tests, including the five network-fixture shim tests) and 4.8-5.0 s in both capsules. These are
+  tests, including the five network-fixture shim tests) and 4.6-4.8 s in both capsules. These are
   operational observations, not a performance gate; no producer benchmark was established before
   this slice.
 
