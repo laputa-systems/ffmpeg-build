@@ -70,8 +70,9 @@ Checked against buildlib 0.2.0 (`30ad4a0a8b697031a008b1de3b5359fc5cf6f2fe`):
   file-digest helpers do not apply.
 
 Consumer policy that stays local and validated: source-lock extension fields (`filename`,
-`archive_root`, `role`, `tag`, `commit`), profile component/licence/device policy
-(`build.py:19`-`152`, `445`-`900`), `ALLOWED_NEEDED`/framework policy, archive membership, modes
+`archive_root`, `role`, `tag`, `commit`), profile component/licence/device policy (constants at
+`build.py:19`-`152`; `load_profile`, `requested_components`, `configure_args_for`,
+`license_files`, `manifest_for`), foreign NEEDED/framework policy, archive membership, modes
 and symlinks (`build.py:2099`-`2151`), release layout, and every audit case. Buildlib's
 structural readers do not prove any of them. The new bootstrap files are the only addition:
 `bootstrap/buildlib-run`, `bootstrap/python.lock`, `scripts/setup-dev`, and
