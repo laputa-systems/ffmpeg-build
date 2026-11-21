@@ -155,7 +155,7 @@ macOS arm64 (native, Apple Silicon), from the lane commit:
 | Gate | Base `5d46fd5` | Lane `0783e876` |
 | --- | --- | --- |
 | `make lint` | exit 0, Ruff and ty clean | exit 0, Ruff and ty clean |
-| `make test` | exit 0, 168 tests, 14.965 s | exit 0, 173 tests, 7.409 s |
+| `make test` | exit 0, 168 tests, 14.965 s | exit 0, 173 tests, 35.7 s |
 
 No test fails on the lane that does not fail identically on the base (zero failures on both).
 `TMPDIR=$PWD/.work/tmp` on the host. The interpreter-only `make lint` path still uses the locked
@@ -196,9 +196,11 @@ distribution default.
   again in the shim) because setup and the shim provision independent tools; the shim's uv branch
   also installs a 30.3 MiB CPython. The python-build branch downloads one 8.03 MiB CPython and the
   25,193-byte wheel. Development tools add about 23 MiB of Ruff/ty wheels once.
-- Warm cost: `sh bootstrap/buildlib-run -- -c pass` is ~1.9 s with a populated cache (it
-  re-hashes the pinned wheel, no download); `make test` is 7.4 s warm. These are operational
-  observations, not a performance gate; no producer benchmark was established before this slice.
+- Warm cost: `sh bootstrap/buildlib-run -- -c pass` is 0.2-2.0 s with a populated cache (it
+  re-hashes the pinned wheel, no download). `make test` took 35.5-35.8 s warm on macOS (173 tests,
+  including the five network-fixture shim tests) and 4.8-5.0 s in both capsules. These are
+  operational observations, not a performance gate; no producer benchmark was established before
+  this slice.
 
 ## Follow-up (outside this slice)
 
