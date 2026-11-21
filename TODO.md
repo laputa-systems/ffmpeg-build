@@ -1,5 +1,14 @@
 Prefix: FFB
-Next: 6
+Next: 7
+
+### FFB-6 · P2 · tools lacks the filters, null muxer and libx265 that toolbox's movie and music commands run
+
+- **Area:** Profiles / Consumers
+- **Where:** profiles/tools.json; docs/tools-profile.md (component table)
+- **Problem:** The usr-installed tools ffmpeg (~/.local/bin/ffmpeg -> release-ac29c7720327f7dee4ed4677ce8421673fcc3563-aarch64-apple-darwin-runtime, FFmpeg 9.0.2, repomod which: owned) is first on PATH, but joshuarli/toolbox (`uv run tool ...`) invokes FFmpeg components the profile does not build, because toolbox is not one of the profile's named workflows (only yt-dlp and usr's encode are). Checked with `ffmpeg -h filter=NAME` / `-h muxer=null` / `-h encoder=libx265`: missing filters loudnorm, ebur128, astats, asplit, firequalizer, zscale, tonemap; missing muxer null; missing encoder libx265. Reproduction: `ffmpeg -hide_banner -f lavfi -i sine=d=1 -af ebur128 -f null -` fails with `Error opening output file -.`. Toolbox call sites: `movies loudnorm` (src/tool/movies/loudnorm.py loudnorm filter, null muxer after toolbox PR #15), `movies encode` crop detection (src/tool/movies/crop.py `-f null`), post-encode decode check (src/tool/movies/encode.py:1184 `-f null -`), `--hdr-policy tonemap` (encode.py:407 zscale+tonemap), the libx265 preset (encode.py:656), `music` loudness (src/tool/music/loudness.py:54 ebur128 + null) and scan verdict (src/tool/music/verdict.py:91-118 asplit/firequalizer/astats + null). Those commands fail on this host and their toolbox tests skip, so toolbox works only when Homebrew's full FFmpeg (/opt/homebrew/bin, later on PATH) is moved ahead of it.
+- **Recommendation:** Decide whether toolbox is a tools consumer. If yes: add the toolbox workflows to tests/tools-workflows.sh (loudnorm measurement, ebur128, the verdict astats graph, cropdetect to null, zscale/tonemap) and add the components that fail them: the null muxer and the loudnorm, ebur128, astats, asplit and firequalizer filters (all LGPL, internal); zscale needs libzimg and libx265 needs x265 (GPL, already in the profile's license), so add those only if the tonemap and libx265 workflows stay supported. Record them in the component table. If no: say in docs/tools-profile.md that the tools pair is not a general FFmpeg and toolbox must use a full FFmpeg. Accept: `ffmpeg -h filter=loudnorm`, `-h filter=ebur128`, `-h filter=astats` and `-h muxer=null` succeed on the installed tools pair, and toolbox's `uv run pytest tests/movies/test_loudnorm.py tests/music/test_loudness.py` pass with only that ffmpeg on PATH; or the docs state the non-consumer decision.
+- **Fix with:** reference-parity
+- **Effort:** M
 
 ### FFB-1 · P3 · tools and runtime cannot encode WebP thumbnails
 
