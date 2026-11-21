@@ -7,8 +7,8 @@ audit of the remaining local implementations, the vendored interpreter bootstrap
 changed, and the plan's per-repository proof. Base revision:
 `5d46fd52671c853f65069fd939612e2d728bb573`. The code change is
 `0783e876f9aa4f1d981d587048f7a68c264c598d`; the cold capsules below ran from a clean clone of
-the final lane tip `e8a7757ef6d8a0a66e4772eb8e1b6ae5f440596f`, which differs from the code
-commit only in this documentation.
+`e8a7757ef6d8a0a66e4772eb8e1b6ae5f440596f`. Every commit after the code commit changes only
+documentation.
 
 ## 1. Bound the change
 
