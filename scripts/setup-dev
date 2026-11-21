@@ -1,0 +1,132 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+lock=$repo_root/bootstrap/python.lock
+
+fail() { printf 'setup-dev: %s\n' "$*" >&2; exit 1; }
+note() { printf 'setup-dev: %s\n' "$*" >&2; }
+
+[ -f "$lock" ] || fail "missing $lock"
+
+system=$(uname -s)
+machine=$(uname -m)
+case "$system:$machine" in
+    Darwin:arm64) target=aarch64-apple-darwin ;;
+    Linux:x86_64) target=x86_64-unknown-linux-musl ;;
+    Linux:aarch64|Linux:arm64) target=aarch64-unknown-linux-musl ;;
+    *) fail "unsupported host: $system $machine" ;;
+esac
+
+os_id='' os_version=''
+if [ -r /etc/os-release ]; then
+    os_id=$(. /etc/os-release && printf '%s' "${ID:-}")
+    os_version=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
+fi
+if [ "$system" = Darwin ]; then
+    command -v xcode-select >/dev/null 2>&1 || fail 'install the Xcode command line tools (xcode-select --install)'
+    xcode-select -p >/dev/null 2>&1 || fail 'install the Xcode command line tools (xcode-select --install)'
+elif [ "$system" = Linux ]; then
+    case "$os_id:$os_version" in
+        ubuntu:24.04|ubuntu:26.04|debian:13|debian:13.*) ;;
+        *) fail "unverified distribution: ${os_id:-unknown} ${os_version:-unknown} (verified: ubuntu 24.04, ubuntu 26.04, debian 13)" ;;
+    esac
+fi
+
+as_root=''
+if [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null 2>&1 || fail 'run as root or install sudo'
+    as_root='sudo'
+fi
+
+packages='curl ca-certificates tar xz-utils git make'
+if [ "$system" = Linux ]; then
+    case "$os_id:$os_version" in
+        ubuntu:24.04)
+            note 'Ubuntu 24.04 ships musl 1.2.4; buildlib-run will take the uv interpreter branch'
+            ;;
+        ubuntu:26.04|debian:13|debian:13.*)
+            packages="$packages musl"
+            ;;
+    esac
+fi
+if [ "$system" = Linux ]; then
+    missing=''
+    for package in $packages; do
+        if ! dpkg -s "$package" >/dev/null 2>&1; then
+            missing="$missing $package"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        note "installing distribution packages:$missing"
+        DEBIAN_FRONTEND=noninteractive $as_root apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive $as_root apt-get install -y -qq $missing
+    fi
+else
+    for tool in curl tar git; do
+        command -v "$tool" >/dev/null 2>&1 || fail "install $tool"
+    done
+fi
+
+uv_version='' uv_url='' uv_size='' uv_sha=''
+while read -r kind a b c d extra; do
+    [ -z "${extra:-}" ] || fail 'invalid lock record'
+    case "$kind" in
+        uv_version) uv_version=$a ;;
+        uv) if [ "$a" = "$target" ]; then uv_url=$b; uv_size=$c; uv_sha=$d; fi ;;
+    esac
+done < "$lock"
+[ -n "$uv_version" ] || fail 'lock has no uv_version'
+[ -n "$uv_url" ] || fail "lock has no uv archive for $target"
+
+if command -v sha256sum >/dev/null 2>&1; then
+    hash() { sha256sum "$1" | cut -d ' ' -f 1; }
+elif command -v shasum >/dev/null 2>&1; then
+    hash() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
+else
+    fail 'install sha256sum or shasum'
+fi
+
+install_dir=/usr/local/bin
+if [ "$(id -u)" -ne 0 ] && [ ! -w "$install_dir" ]; then
+    install_dir=$HOME/.local/bin
+    mkdir -p "$install_dir"
+fi
+
+installed=''
+if command -v uv >/dev/null 2>&1; then
+    installed=$(uv --version 2>/dev/null | awk '{print $2}')
+fi
+if [ "$installed" = "$uv_version" ]; then
+    note "uv $uv_version already on PATH"
+else
+    scratch=$(mktemp -d "${TMPDIR:-/tmp}/setup-dev.XXXXXXXX")
+    trap 'rm -rf "$scratch"' 0
+    trap 'exit 1' HUP INT TERM
+    note "downloading uv $uv_version for $target"
+    curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$scratch/uv.tar.gz" "$uv_url"
+    actual_size=$(wc -c < "$scratch/uv.tar.gz" | tr -d ' ')
+    [ "$actual_size" = "$uv_size" ] || fail "uv archive size mismatch: $actual_size != $uv_size"
+    [ "$(hash "$scratch/uv.tar.gz")" = "$uv_sha" ] || fail 'uv archive sha256 mismatch'
+    mkdir "$scratch/install"
+    tar -xzf "$scratch/uv.tar.gz" -C "$scratch/install"
+    set -- "$scratch"/install/uv-*/uv
+    [ -f "$1" ] || fail 'uv archive lacks the uv executable'
+    install -m 755 "$1" "$install_dir/uv"
+    case ":$PATH:" in
+        *":$install_dir:"*) ;;
+        *) fail "uv installed to $install_dir; add it to PATH and rerun" ;;
+    esac
+    rm -rf "$scratch"
+    trap - 0 HUP INT TERM
+    note "installed uv $uv_version to $install_dir/uv"
+fi
+
+cd "$repo_root"
+note 'installing locked development dependencies (coverage, mutmut, pytest, ruff, ty) from uv.lock'
+uv sync --frozen --no-install-project
+
+note 'verifying the vendored buildlib bootstrap'
+sh bootstrap/buildlib-run -- -c 'import sys, buildlib; print(sys.version.split()[0], buildlib.__file__)'
+
+note 'ready: make lint test (or make setup to rerun)'

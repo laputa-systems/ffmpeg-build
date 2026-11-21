@@ -1,4 +1,4 @@
-PYTHON ?= python3
+PYTHON ?= sh bootstrap/buildlib-run --
 HOST_OS := $(shell uname -s)
 HOST_ARCH := $(shell uname -m)
 ifeq ($(HOST_OS),Darwin)
@@ -22,7 +22,7 @@ build_profile = $(PYTHON) build.py build --target $(TARGET) --profile $(1) && $(
 verify_archive = $(PYTHON) build.py qualify --archive $(1)
 endif
 
-.PHONY: coverage mutants-diff fetch build package verify lint test clean
+.PHONY: coverage mutants-diff fetch build package verify lint test setup clean
 
 fetch:
 	@set -eu; for profile in $(PROFILES); do $(PYTHON) build.py fetch --target $(TARGET) --profile $$profile; done
@@ -42,7 +42,10 @@ verify:
 	done
 
 test:
-	uv run --frozen python -m unittest discover -s tests
+	$(PYTHON) -m unittest discover -s tests
+
+setup:
+	sh scripts/setup-dev
 
 coverage:
 	mkdir -p .work/coverage

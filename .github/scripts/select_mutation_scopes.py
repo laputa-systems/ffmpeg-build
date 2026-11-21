@@ -63,7 +63,7 @@ SCOPES = {
 CONFIGURATION = frozenset({
     ".gitattributes", ".gitignore", "Makefile", "pyproject.toml", "sources.lock.json", "uv.lock",
 })
-INPUT_DIRECTORIES = (".github/", "patches/", "profiles/", "scripts/", "tests/")
+INPUT_DIRECTORIES = (".github/", "bootstrap/", "patches/", "profiles/", "scripts/", "tests/")
 
 
 
