@@ -18,30 +18,32 @@ This repository owns the custom FFmpeg sources, pins, profiles, codec recipes, p
 `make build TARGET=<triple>` builds, audits, and packages every profile for the target, and `make verify TARGET=<triple>` qualifies the archives in `dist/`. `TARGET` defaults to the host's triple. The individual steps:
 
 ```sh
-python3 build.py build --target aarch64-apple-darwin --profile play-sdk
-python3 build.py audit --target aarch64-apple-darwin --profile play-sdk
-python3 build.py package --target aarch64-apple-darwin --profile play-sdk
-python3 build.py qualify --archive dist/ffmpeg-play-sdk-9.0.2-aarch64-apple-darwin.tar.xz
+sh bootstrap/buildlib-run -- build.py build --target aarch64-apple-darwin --profile play-sdk
+sh bootstrap/buildlib-run -- build.py audit --target aarch64-apple-darwin --profile play-sdk
+sh bootstrap/buildlib-run -- build.py package --target aarch64-apple-darwin --profile play-sdk
+sh bootstrap/buildlib-run -- build.py qualify --archive dist/ffmpeg-play-sdk-9.0.2-aarch64-apple-darwin.tar.xz
 
-python3 build.py build --target aarch64-apple-darwin --profile runtime
-python3 build.py audit --target aarch64-apple-darwin --profile runtime
+sh bootstrap/buildlib-run -- build.py build --target aarch64-apple-darwin --profile runtime
+sh bootstrap/buildlib-run -- build.py audit --target aarch64-apple-darwin --profile runtime
 
 scripts/linux-build.sh x86_64-unknown-linux-musl runtime
-python3 build.py package --target x86_64-unknown-linux-musl --profile runtime
+sh bootstrap/buildlib-run -- build.py package --target x86_64-unknown-linux-musl --profile runtime
 scripts/linux-qualify.sh dist/ffmpeg-runtime-9.0.2-x86_64-unknown-linux-musl.tar.xz
 
 scripts/linux-build.sh x86_64-unknown-linux-musl tools
-python3 build.py package --target x86_64-unknown-linux-musl --profile tools
+sh bootstrap/buildlib-run -- build.py package --target x86_64-unknown-linux-musl --profile tools
 scripts/linux-qualify.sh dist/ffmpeg-tools-9.0.2-x86_64-unknown-linux-musl.tar.xz
 
 scripts/linux-build.sh x86_64-unknown-linux-musl fixtures
 ```
 
+The controller runs on the pinned Python 3.15 and the pinned `laputa-buildlib` wheel provisioned by the vendored `bootstrap/buildlib-run`; no distribution Python, `uv`, or `pip` is needed on the build path.
+
 Targets are `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`. Each builds natively: macOS on the host, Linux in a `linux/amd64` or `linux/arm64` container. Sources are cached under `.work/cache/sources` and verified against `sources.lock.json` on every use. Build trees live at `.work/build/<target>/<profile>` and stages at `.work/stage/<target>/<profile>`.
 
 `runtime` is the union of the other two profiles built once as shared libraries: `ffmpeg`, `ffprobe`, and libav* that find each other through `$ORIGIN` or `@loader_path`, with dav1d and zlib linked in, GPL, and no network protocols or `ffplay`; the virtual `lavfi` input is its only device. `play-sdk` is a static playback SDK with no programs, encoders, muxers, devices, or network protocols. `tools` is the static, headless, GPL `ffmpeg`/`ffprobe` pair, with no network protocols or `ffplay`, and `lavfi` as its only device. `play-sdk` stays LGPL. The `fixtures` profile is test-only, GPL, and Linux `x86_64` only: static `ffmpeg`/`ffprobe` with the six external encoders Play's fixture generator needs. It is released only as the `ffmpeg-fixtures-<version>-x86_64-unknown-linux-musl.tar.xz` archive for generating test data, is not a runtime, and `build.py` rejects any other target. See `docs/runtime.md`, `docs/play-sdk.md`, `docs/tools-profile.md`, `docs/fixtures.md`, `docs/artifacts.md`, and `docs/release.md`.
 
-Releases publish one `ffmpeg-<profile>-<version>-<target>.tar.xz` and `.manifest.json` per profile and target, tagged `release-<commit>` (see `docs/release.md`). Lint: `make lint`. Tests: `make test` or `python3 -m unittest discover -s tests`. Fixtures for the workflow tests come from `tests/fixtures/gen.sh .work/fixtures`, which needs a full host FFmpeg 9.0.2, or from `scripts/linux-fixtures.sh`.
+Releases publish one `ffmpeg-<profile>-<version>-<target>.tar.xz` and `.manifest.json` per profile and target, tagged `release-<commit>` (see `docs/release.md`). Lint: `make lint` after `make setup`. Tests: `make test` or `sh bootstrap/buildlib-run -- -m unittest discover -s tests`. Fixtures for the workflow tests come from `tests/fixtures/gen.sh .work/fixtures`, which needs a full host FFmpeg 9.0.2, or from `scripts/linux-fixtures.sh`.
 
 `make coverage` records controller branch coverage in `.work/coverage/report.json`.
 `make mutants-diff` tests committed changes since the merge base with `origin/main`
@@ -52,3 +54,9 @@ a different local Buildlib checkout. Set `MUTATION_SCOPE` to rerun one scope
 selected for the change. The hosted gate runs the same target on all three
 hosts. Preparation warms each host's locked package cache and shares one
 verified Buildlib wheel across the mutation archives.
+
+## Develop
+
+`make setup` provisions the pinned interpreter, the pinned development tools and
+the vendored bootstrap; `make lint test` runs the gates. See
+`docs/DEVELOPMENT.md`.
