@@ -1,5 +1,8 @@
 # ffmpeg-build
 
+`make clean` removes the local release, build, and stage outputs.
+It preserves installed dependencies and unrelated scratch files.
+
 Producer repository for the pinned FFmpeg sources, profiles, builds, audits, and releases consumed by `play` and `usr`.
 
 ## Commands

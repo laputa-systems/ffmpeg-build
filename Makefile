@@ -63,5 +63,12 @@ lint:
 	uv run --frozen ty check
 
 clean:
-	rm -rf dist .work/build .work/stage .work/tmp .venv
-	find . -path './.git' -prune -o -path './.work' -prune -o -name __pycache__ -type d -prune -exec rm -rf {} +
+	@for parent in ./.work; do \
+	  if test -L "$$parent"; then printf '%s\n' "make clean: $$parent must be a local directory" >&2; exit 1; fi; \
+	done
+	@for artifact in ./dist ./.work/build ./.work/stage; do \
+	  if test -L "$$artifact" || { test -e "$$artifact" && ! test -d "$$artifact"; }; then \
+	    printf '%s\n' "make clean: $$artifact must be a local build directory" >&2; exit 1; \
+	  fi; \
+	done
+	rm -rf -- ./dist ./.work/build ./.work/stage
