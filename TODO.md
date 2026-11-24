@@ -40,7 +40,7 @@ Next: 7
 ### FFB-4 · P3 · Measure profile build cost
 
 - **Area:** Build performance
-- **Where:** plan.md:81; Makefile:30
+- **Where:** docs/baseline.md; Makefile:30
 - **Problem:** Historical profile build timings were taken on a busy host and include emulation for Linux; they do not establish repeatable native build time, CPU, memory or I/O baselines per target.
 - **Recommendation:** Define repeatable clean and warm profile builds with input and host identity, completed artifacts, paired comparisons and separate process-tree resource attribution.
 - **Fix with:** bench-pyramid

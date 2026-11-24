@@ -5,6 +5,8 @@ It preserves installed dependencies and unrelated scratch files.
 
 Producer repository for the pinned FFmpeg sources, profiles, builds, audits, and releases consumed by `play` and `usr`.
 
+The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future work; its Status is the resume point.
+
 ## Commands
 
 ```sh
