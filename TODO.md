@@ -1,5 +1,5 @@
 Prefix: FFB
-Next: 9
+Next: 10
 
 ### FFB-6 · P2 · tools lacks the filters, null muxer and libx265 that toolbox's movie and music commands run
 
@@ -61,5 +61,14 @@ Next: 9
 - **Where:** build.py build_libdrm, build_libva, RUNTIME_VA_LIBRARIES; .github/scripts/select_mutation_scopes.py SCOPES
 - **Problem:** FFB-7 (laputa-systems/ffmpeg-build#88) added module-level build functions and a constant, which the whole-change mutation trial refuses by design (`module-level build.py changes need mutation qualification`), so the new libva/libdrm build and bundling code merged with functional verification only (full x86_64 runtime build, 163 audit checks, 55 Alpine workflow checks, qualification, 150 unit tests, Ubuntu and Alpine runtime checks) and no mutation run.
 - **Recommendation:** Add build_libdrm and build_libva to a mutation scope (with the receipts the selector expects), qualify RUNTIME_VA_LIBRARIES through the runtime audit scope, and run the scopes on both Linux architectures.
+- **Fix with:** none
+- **Effort:** M
+
+### FFB-9 · P2 · The build scope's mutation receipt is stale, so every whole-change run fails
+
+- **Area:** tests · mutation
+- **Where:** .github/mutation-scopes.json `build` (total 336, source_sha256 dc8734d7…); scripts/run-mutation-scope.sh; build.py x_build
+- **Problem:** build.py's build function grew (d16c33a4 bundled libva, 2d6770e9 self-built fixtures) without regenerating the receipt, so the native mutation jobs stop with `build: found 357 mutations, expected 336` on any change that selects the build scope, including fleet buildlib bumps that touch only pins (laputa-systems/ffmpeg-build#90, merged red).
+- **Recommendation:** Rerun the build scope natively on ubuntu-26.04, ubuntu-26.04-arm and xcode-27, record the new total, source hash and per-runner survivors, and kill or justify new survivors; fold in FFB-8's libva/libdrm scope while the runners are warm.
 - **Fix with:** none
 - **Effort:** M
