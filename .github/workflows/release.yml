@@ -58,7 +58,7 @@ jobs:
     name: Fixtures
     needs: preflight
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -67,7 +67,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Generate fixtures with Alpine FFmpeg 9.0.2
+      - name: Build fixtures profile and generate fixtures
         run: scripts/linux-fixtures.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
