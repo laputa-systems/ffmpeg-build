@@ -10,15 +10,6 @@ Next: 8
 - **Fix with:** reference-parity
 - **Effort:** M
 
-### FFB-7 · P2 · Linux ffmpeg-runtime needs musl libva, so it cannot run on glibc runners
-
-- **Area:** build · linking
-- **Where:** ffmpeg-runtime Linux build (libavutil hwcontext VA-API); release archive
-- **Problem:** With only the distribution musl loader on ubuntu:26.04, ffmpeg-runtime's ffmpeg fails at load: `libavutil.so.61: vaMapBuffer2: symbol not found` (and vaSyncSurface). libavutil links libva dynamically, and Ubuntu ships no musl libva, so consumers on GitHub's Ubuntu runners cannot use ffmpeg-runtime and keep upstream FFmpeg.
-- **Recommendation:** Load libva at runtime (dlopen, as FFmpeg supports for some hwaccels) or bundle a musl libva in the runtime archive's lib/, and add a release check that runs `ffmpeg -version` in ubuntu:26.04 with only the distribution musl package.
-- **Fix with:** none
-- **Effort:** M
-
 ### FFB-1 · P3 · tools and runtime cannot encode WebP thumbnails
 
 - **Area:** Build

@@ -39,6 +39,8 @@ FFMPEG_LICENSES = {
 }
 DEPENDENCY_LICENSE_FILES = {
     "dav1d": ("COPYING",),
+    "libva": ("COPYING",),
+    "libdrm": ("xf86drm.c", "xf86drmHash.c", "xf86drmRandom.c", "xf86drmSL.c", "xf86drmMode.c"),
     "zlib": ("LICENSE",),
     "x264": ("COPYING",),
     "x265": ("COPYING",),
@@ -206,10 +208,7 @@ def load_sources():
 ARTIFACTS = ("sdk", "tools", "runtime")
 TOOLS_PROGRAMS = ("ffmpeg", "ffprobe")
 RUNTIME_LIBRARIES = ("libavcodec", "libavdevice", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
-SYSTEM_LIBRARY_SONAMES = {
-    "libva": "libva.so.2",
-    "libva-drm": "libva-drm.so.2",
-}
+RUNTIME_VA_LIBRARIES = ("libva", "libva-drm")
 MUSL_LOADER = {target.machine: target.musl_loader for target in targets.TARGETS.values() if target.is_linux}
 RUNTIME_SEARCH_PATHS = {
     "linux": {"program": "$ORIGIN/../lib", "library": "$ORIGIN"},
@@ -551,6 +550,27 @@ def build_dav1d(source, source_dir, build_dir, prefix, env, config):
     run(["ninja", "-C", str(build_dir), "install"], env=env)
 
 
+def build_libdrm(source, source_dir, build_dir, prefix, env, config):
+    if config["platform"] != "linux":
+        return
+    run(["meson", "setup", str(build_dir), str(source_dir), f"--prefix={prefix}",
+         "--libdir=lib", "--buildtype=release", "--default-library=static",
+         "--auto-features=disabled", "-Db_staticpic=true", "-Dtests=false"], env=env)
+    run(["ninja", "-C", str(build_dir), "install"], env=env)
+
+
+def build_libva(source, source_dir, build_dir, prefix, env, config):
+    if config["platform"] != "linux":
+        return
+    env = env.copy()
+    env["LDFLAGS"] = f"-Wl,-rpath,$ORIGIN -Wl,-z,stack-size={MUSL_THREAD_STACK_BYTES}"
+    run(["meson", "setup", str(build_dir), str(source_dir), f"--prefix={prefix}",
+         "--libdir=lib", "--buildtype=release", "-Dprefer_static=true",
+         "--sysconfdir=/etc", "-Ddriverdir=/usr/lib/dri", "-Dwith_x11=no", "-Dwith_glx=no",
+         "-Dwith_wayland=no", "-Dwith_win32=no"], env=env)
+    run(["ninja", "-C", str(build_dir), "install"], env=env)
+
+
 def cmake_build(build_dir, source_dir, prefix, env, options):
     if build_dir.exists():
         shutil.rmtree(build_dir)
@@ -691,6 +711,8 @@ def build_opus(source, source_dir, build_dir, prefix, env, config):
 
 
 DEPENDENCY_BUILDERS = {
+    "libdrm": build_libdrm,
+    "libva": build_libva,
     "zlib": build_zlib,
     "dav1d": build_dav1d,
     "x264": build_x264,
@@ -927,6 +949,7 @@ def stage_complete(stage, profile, platform_name):
             "include/libavutil/ffversion.h",
             *(development_link(library, platform_name) for library in RUNTIME_LIBRARIES),
             *(f"lib/pkgconfig/{library}.pc" for library in RUNTIME_LIBRARIES),
+            *(f"lib/{library}.so.2" for library in RUNTIME_VA_LIBRARIES if platform_name == "linux"),
             "share/ffmpeg-build/manifest.json",
         )
         return all((stage / path).is_file() for path in required)
@@ -1111,6 +1134,10 @@ def build(target, profile_name):
     run(["make", "install", f"DESTDIR={install_root}"], cwd=ffmpeg_build, env=ffmpeg_env(config, deps))
     shutil.copytree(install_root / INSTALL_PREFIX.lstrip("/"), stage, symlinks=True, dirs_exist_ok=True)
     shutil.rmtree(install_root)
+
+    if artifact == "runtime" and config["platform"] == "linux":
+        for name in RUNTIME_VA_LIBRARIES:
+            shutil.copyfile(deps / "lib" / f"{name}.so.2", stage / "lib" / f"{name}.so.2")
 
     prune_stage(stage, artifact)
     install_notices(profile, target, sources, stage)
@@ -1721,6 +1748,14 @@ def library_layout(regular_files, links, platform_name):
         claimed_files.add(real)
         claimed_links.update(names)
         layout[library] = {"file": real, "links": sorted(names), "major": major}
+    if platform_name == "linux":
+        for library in RUNTIME_VA_LIBRARIES:
+            path = f"lib/{library}.so.2"
+            if path not in lib_files:
+                problems.append(f"{library}: missing {path}")
+                continue
+            claimed_files.add(path)
+            layout[library] = {"file": path, "links": [], "major": 2}
     extra_files = sorted(lib_files - claimed_files)
     if extra_files:
         problems.append(f"unexpected files in {LINK_DIRECTORY}/: {extra_files}")
@@ -1853,7 +1888,6 @@ def bundled_symbol_exports(symbols):
 
 def foreign_elf_needed(needed, siblings, config):
     allowed = set(siblings) | {f"libc.musl-{config['arch']}.so.1"}
-    allowed |= {SYSTEM_LIBRARY_SONAMES[name] for name in config.get("system_libraries", [])}
     return sorted(set(needed) - allowed)
 
 
@@ -1915,7 +1949,7 @@ def audit_runtime(case, config, stage, version, requested, resolved, manifest):
     symlinks = symlink_problems(links, set(files))
     case("symlinks are relative, inside lib/, and resolve", not symlinks, "; ".join(symlinks[:5]))
     layout, layout_problems = library_layout(set(files), links, platform_name)
-    case("lib/ holds exactly the seven FFmpeg libraries and their links", not layout_problems, "; ".join(layout_problems))
+    case("lib/ holds exactly the runtime libraries and their links", not layout_problems, "; ".join(layout_problems))
 
     pc_dir = stage / "lib" / "pkgconfig"
     pc_names = sorted(path.name for path in pc_dir.glob("*.pc")) if pc_dir.is_dir() else []
@@ -2131,7 +2165,8 @@ QUALIFY_SCRIPTS = {"sdk": "qualify-sdk.sh", "tools": "qualify-tools.sh", "runtim
 
 def extracted_library_problems(prefix, libraries, platform_name):
     problems = []
-    if sorted(libraries) != sorted(RUNTIME_LIBRARIES):
+    expected = RUNTIME_LIBRARIES + (RUNTIME_VA_LIBRARIES if platform_name == "linux" else ())
+    if sorted(libraries) != sorted(expected):
         problems.append(f"libraries {sorted(libraries)}")
     key = identity_key(platform_name)
     for library, entry in sorted(libraries.items()):
