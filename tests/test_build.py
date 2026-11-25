@@ -1056,7 +1056,14 @@ class StageTests(unittest.TestCase):
                 path.write_text("fixture notice", encoding="utf-8")
 
         ffmpeg_source = source_root / "ffmpeg"
-        dep_builders = {name: mock.Mock() for name in ("dav1d", "zlib")}
+        dep_builders = {name: mock.Mock() for name in profile["sources"] if name != "ffmpeg"}
+        if artifact == "runtime" and config["platform"] == "linux":
+            def install_va(*args):
+                for name in build.RUNTIME_VA_LIBRARIES:
+                    path = deps / "lib" / f"{name}.so.2"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"fixture")
+            dep_builders["libva"].side_effect = install_va
         calls = [
             mock.call(["patch", "-p1", "-i", build.ROOT / "patches/ffmpeg-owned-help.patch"], cwd=ffmpeg_source),
             mock.call([str(ffmpeg_source / "configure"), *arguments], cwd=ffmpeg_build, env=compile_env),
@@ -1687,6 +1694,15 @@ class StageTests(unittest.TestCase):
                 "sha256": hashing.sha256_file(path),
             }
 
+        if platform == "linux":
+            for library in build.RUNTIME_VA_LIBRARIES:
+                path = stage / "lib" / f"{library}.so.2"
+                path.write_bytes(library.encode())
+                identities[path] = path.name
+                objects[path] = "library"
+                entries[library] = {"file": f"lib/{path.name}", "links": [], "soname": path.name,
+                                    "sha256": hashing.sha256_file(path)}
+
         command_outputs = {
             "-buildconf": "--disable-network",
             "-protocols": "Input:\n  file\nOutput:\n  file\n",
@@ -1800,7 +1816,7 @@ class StageTests(unittest.TestCase):
                     "FFmpeg headers present",
                     "no dav1d or zlib headers",
                     "symlinks are relative, inside lib/, and resolve",
-                    "lib/ holds exactly the seven FFmpeg libraries and their links",
+                    "lib/ holds exactly the runtime libraries and their links",
                     "pkg-config files are the seven libraries",
                     "libavutil.pc relocatable and shared-only",
                     f"libavutil {key} is {identity}",
@@ -1830,7 +1846,7 @@ class StageTests(unittest.TestCase):
             [
                 "programs are ffmpeg and ffprobe",
                 "FFmpeg headers present",
-                "lib/ holds exactly the seven FFmpeg libraries and their links",
+                "lib/ holds exactly the runtime libraries and their links",
                 "pkg-config files are the seven libraries",
                 "ffmpeg present",
                 "ffprobe present",
@@ -2391,6 +2407,12 @@ class StageTests(unittest.TestCase):
                 "file": file, "links": [link], identity: pathlib.Path(file).name,
                 "sha256": hashing.sha256_file(stage / file),
             }
+        if suffix == "so":
+            for library in build.RUNTIME_VA_LIBRARIES:
+                path = stage / "lib" / f"{library}.so.2"
+                path.write_bytes(b"va fixture")
+                libraries[library] = {"file": f"lib/{path.name}", "links": [], identity: path.name,
+                                      "sha256": hashing.sha256_file(path)}
         manifest["libraries"] = libraries
         manifest_path.write_text(json.dumps(manifest))
         name = archive.name.removesuffix(".tar.xz")
@@ -2557,7 +2579,7 @@ SONAME_CHAIN = {
 
 
 def linux_runtime_tree():
-    regular = set()
+    regular = {f"lib/{library}.so.2" for library in build.RUNTIME_VA_LIBRARIES}
     links = {}
     for index, library in enumerate(build.RUNTIME_LIBRARIES):
         real = f"{library}.so.{60 + index}.1.100"
@@ -2587,6 +2609,8 @@ class RuntimeProfileTests(unittest.TestCase):
             config = build.target_config(runtime, target)
             for key in ("frameworks", "system_libraries"):
                 wanted = set(build.target_config(tools, target)[key]) | set(build.target_config(sdk, target)[key])
+                if key == "system_libraries" and config["platform"] == "linux":
+                    wanted -= {"libva", "libva-drm"}
                 self.assertEqual(set(config[key]), wanted, (target, key))
 
     def test_runtime_keeps_network_devices_and_ffplay_out(self):
@@ -2920,6 +2944,15 @@ class StageFilesystemTests(unittest.TestCase):
                         "sha256": hashlib.sha256(payload).hexdigest(),
                     }
 
+                if platform_name == "linux":
+                    for library in build.RUNTIME_VA_LIBRARIES:
+                        binary = library_dir / f"{library}.so.2"
+                        payload = binary.name.encode("ascii")
+                        binary.write_bytes(payload)
+                        responses[("readelf", "-dW", str(binary))] = f" 0x1 (SONAME) Library soname: [{binary.name}]\n"
+                        expected[library] = {"file": f"lib/{binary.name}", "links": [], "soname": binary.name,
+                                             "sha256": hashlib.sha256(payload).hexdigest()}
+
                 with mock.patch.object(build, "output", side_effect=lambda argv, responses=responses: responses[tuple(argv)]) as output:
                     self.assertEqual(build.runtime_libraries_manifest(self.stage, platform_name), expected)
                     output.assert_has_calls([mock.call(list(argv)) for argv in responses], any_order=True)
@@ -2946,11 +2979,22 @@ class StageFilesystemTests(unittest.TestCase):
             str(error.exception),
             "error: runtime library layout: " + "; ".join(
                 f"{library}: expected one versioned library file, found []" for library in build.RUNTIME_LIBRARIES
-            ),
+            ) + "; libva: missing lib/libva.so.2; libva-drm: missing lib/libva-drm.so.2",
         )
 
 
 class LibraryLayoutTests(unittest.TestCase):
+    def test_linux_requires_bundled_va_libraries(self):
+        regular, links = linux_runtime_tree()
+        for name in ("libva.so.2", "libva-drm.so.2"):
+            regular.add(f"lib/{name}")
+        layout, problems = build.library_layout(regular, links, "linux")
+        self.assertEqual(problems, [])
+        self.assertEqual(layout["libva"]["file"], "lib/libva.so.2")
+        regular.remove("lib/libva-drm.so.2")
+        _, problems = build.library_layout(regular, links, "linux")
+        self.assertTrue(any("libva-drm" in problem for problem in problems))
+
     def test_linux_layout(self):
         regular, links = linux_runtime_tree()
         layout, problems = build.library_layout(regular | {"bin/ffmpeg"}, links, "linux")
@@ -2995,7 +3039,7 @@ class LibraryLayoutTests(unittest.TestCase):
         regular.add("lib/libavcodec.so.60.2.100")
         links["lib/libdav1d.so"] = "libdav1d.so.7.0.0"
         layout, problems = build.library_layout(regular, links, "linux")
-        self.assertEqual(set(layout), set(build.RUNTIME_LIBRARIES) - {"libavcodec"})
+        self.assertEqual(set(layout), (set(build.RUNTIME_LIBRARIES) - {"libavcodec"}) | set(build.RUNTIME_VA_LIBRARIES))
         self.assertEqual(problems, [
             (
                 "libavcodec: expected one versioned library file, found "
@@ -3083,11 +3127,11 @@ class BinaryInspectionTests(unittest.TestCase):
     def test_foreign_elf_needed(self):
         profile, _ = build.load_profile("runtime")
         config = build.target_config(profile, "x86_64-unknown-linux-musl")
-        siblings = {"libavutil.so.61", "libavcodec.so.63"}
+        siblings = {"libavutil.so.61", "libavcodec.so.63", "libva.so.2", "libva-drm.so.2"}
         allowed = ["libavutil.so.61", "libc.musl-x86_64.so.1", "libva.so.2", "libva-drm.so.2"]
         self.assertEqual(build.foreign_elf_needed(allowed, siblings, config), [])
         self.assertEqual(
-            build.foreign_elf_needed(allowed, siblings, {"arch": "x86_64"}), ["libva-drm.so.2", "libva.so.2"],
+            build.foreign_elf_needed(allowed, siblings - {"libva.so.2", "libva-drm.so.2"}, {"arch": "x86_64"}), ["libva-drm.so.2", "libva.so.2"],
         )
         forbidden = ["libgcc_s.so.1", "libstdc++.so.6", "libz.so.1", "libdav1d.so.7", "libc.musl-aarch64.so.1", "libdrm.so.2"]
         self.assertEqual(build.foreign_elf_needed(allowed + forbidden, siblings, config), sorted(forbidden))
@@ -3423,6 +3467,8 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertFalse(build.stage_complete(self.stage, runtime, "linux"))
         for library in build.RUNTIME_LIBRARIES:
             self.link(f"lib/{library}.so", f"{library}.so.1.0.0")
+        for library in build.RUNTIME_VA_LIBRARIES:
+            self.write(f"lib/{library}.so.2")
         self.assertTrue(build.stage_complete(self.stage, runtime, "linux"))
         self.assertFalse(build.stage_complete(self.stage, runtime, "macos"))
         (self.stage / "share/licenses/ffmpeg/COPYING.GPLv2").unlink()
@@ -3439,6 +3485,10 @@ class RuntimeStageTests(unittest.TestCase):
             "sha256": hashing.sha256_file(real),
         }
         libraries = {library: dict(entry) for library in build.RUNTIME_LIBRARIES}
+        for library in build.RUNTIME_VA_LIBRARIES:
+            path = self.write(f"lib/{library}.so.2", b"elf va")
+            libraries[library] = {"file": f"lib/{path.name}", "links": [], "soname": path.name,
+                                  "sha256": hashing.sha256_file(path)}
         self.assertEqual(build.extracted_library_problems(self.stage, libraries, "linux"), [])
         libraries["libavcodec"]["sha256"] = "0" * 64
         libraries["libavutil"]["links"] = ["lib/libavutil.so"]

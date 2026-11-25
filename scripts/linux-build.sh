@@ -33,6 +33,14 @@ rm -rf "$clean"
 mkdir -p "$clean/prefix" "$clean/scratch"
 cp -RP "$ROOT/.work/stage/$target/$profile/." "$clean/prefix/"
 
+if [ "$profile" = runtime ]; then
+    docker run --rm --init --platform "$platform" \
+        -v "$clean/prefix:/opt/ffmpeg:ro" \
+        -v "$ROOT/tests/runtime-ubuntu.sh:/runtime-ubuntu.sh:ro" \
+        ubuntu:26.04 \
+        sh /runtime-ubuntu.sh
+fi
+
 docker run --rm --init --platform "$platform" \
     --user "$(id -u):$(id -g)" \
     -e TOOLS_WORK=/scratch/run \

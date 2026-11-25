@@ -7,7 +7,9 @@
   "sources": [
     "ffmpeg",
     "dav1d",
-    "zlib"
+    "zlib",
+    "libdrm",
+    "libva"
   ],
   "components": {
     "demuxers": [
@@ -197,16 +199,15 @@
         ]
       },
       "frameworks": [],
-      "system_libraries": [
-        "libva",
-        "libva-drm"
-      ],
+      "system_libraries": [],
       "external_libraries": [
         "dav1d"
       ],
       "bundled_dependencies": [
         "dav1d",
-        "zlib"
+        "zlib",
+        "libdrm",
+        "libva"
       ]
     },
     "aarch64-unknown-linux-musl": {
@@ -228,16 +229,15 @@
         ]
       },
       "frameworks": [],
-      "system_libraries": [
-        "libva",
-        "libva-drm"
-      ],
+      "system_libraries": [],
       "external_libraries": [
         "dav1d"
       ],
       "bundled_dependencies": [
         "dav1d",
-        "zlib"
+        "zlib",
+        "libdrm",
+        "libva"
       ]
     }
   }
