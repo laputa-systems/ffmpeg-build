@@ -107,6 +107,51 @@
       "archive_root": "opus-1.6.1"
     },
     {
+      "name": "aom",
+      "version": "3.15.3",
+      "url": "https://storage.googleapis.com/aom-releases/libaom-3.15.3.tar.gz",
+      "sha256": "12c01dc731ed7b5a999e28120b45bf58a002ba3435a4ba2cfbc1e084a27c9c04",
+      "role": "source",
+      "filename": "libaom-3.15.3.tar.gz",
+      "archive_root": "libaom-3.15.3"
+    },
+    {
+      "name": "webp",
+      "version": "1.6.0",
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
+      "role": "source",
+      "filename": "libwebp-1.6.0.tar.gz",
+      "archive_root": "libwebp-1.6.0"
+    },
+    {
+      "name": "ogg",
+      "version": "1.3.6",
+      "url": "https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.xz",
+      "sha256": "5c8253428e181840cd20d41f3ca16557a9cc04bad4a3d04cce84808677fa1061",
+      "role": "source",
+      "filename": "libogg-1.3.6.tar.xz",
+      "archive_root": "libogg-1.3.6"
+    },
+    {
+      "name": "vorbis",
+      "version": "1.3.7",
+      "url": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz",
+      "sha256": "b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b",
+      "role": "source",
+      "filename": "libvorbis-1.3.7.tar.xz",
+      "archive_root": "libvorbis-1.3.7"
+    },
+    {
+      "name": "theora",
+      "version": "1.2.0",
+      "url": "https://downloads.xiph.org/releases/theora/libtheora-1.2.0.tar.xz",
+      "sha256": "ebdf77a8f5c0a8f7a9e42323844fa09502b34eb1d1fece7b5f54da41fe2122ec",
+      "role": "source",
+      "filename": "libtheora-1.2.0.tar.xz",
+      "archive_root": "libtheora-1.2.0"
+    },
+    {
       "name": "laputa-buildlib",
       "version": "0.3.1",
       "url": "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.1-py3-none-any.whl",

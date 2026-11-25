@@ -2725,9 +2725,12 @@ class FixturesProfileTests(unittest.TestCase):
         for source in ("zlib", "x264", "x265", "svtav1", "vpx", "lame", "opus"):
             self.assertIn(source, profile["sources"])
 
-    def test_profile_is_linux_x86_64_only(self):
+    def test_profile_is_linux_only(self):
         profile, _ = build.load_profile("fixtures")
-        self.assertEqual(list(profile["targets"]), ["x86_64-unknown-linux-musl"])
+        self.assertEqual(
+            list(profile["targets"]),
+            ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"],
+        )
         self.assertEqual(build.profile_target_problems(profile), [])
         with self.assertRaises(SystemExit):
             build.configure_args_for(
