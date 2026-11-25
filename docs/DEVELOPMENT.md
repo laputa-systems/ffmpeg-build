@@ -53,9 +53,10 @@ through the shim and needs no development-tool installation.
 - Docker with a working daemon runs the native Linux builds in the
   digest-pinned Alpine image used by CI (`scripts/linux-build.sh`,
   `scripts/linux-qualify.sh`); it is not needed for `make lint test`.
-- A host FFmpeg 9.0.2 generates the workflow fixtures
-  (`tests/fixtures/gen.sh .work/fixtures`); `scripts/linux-fixtures.sh` is the
-  container alternative.
+- `scripts/linux-fixtures.sh` generates the workflow fixtures
+  (`tests/fixtures/gen.sh .work/fixtures`) with this repository's own
+  `fixtures` profile build inside the pinned Linux container; a full host
+  FFmpeg 9.0.2 also works.
 - A native toolchain is required for `make build` on macOS and inside the Linux
   container; it is not needed for `make lint test`.
 

@@ -48,6 +48,11 @@ DEPENDENCY_LICENSE_FILES = {
     "vpx": ("LICENSE",),
     "lame": ("COPYING",),
     "opus": ("COPYING",),
+    "aom": ("LICENSE", "PATENTS"),
+    "webp": ("COPYING", "PATENTS"),
+    "ogg": ("COPYING",),
+    "vorbis": ("COPYING",),
+    "theora": ("LICENSE", "COPYING"),
 }
 ALLOWED_INDEVS = ("lavfi",)
 FFMPEG_LIBRARY_FEATURES = frozenset({"x264_hdr10"})
@@ -710,6 +715,83 @@ def build_opus(source, source_dir, build_dir, prefix, env, config):
     run(["make", "install"], cwd=source_dir, env=env)
 
 
+def build_aom(source, source_dir, build_dir, prefix, env, config):
+    cmake_build(
+        build_dir,
+        source_dir,
+        prefix,
+        env,
+        [
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DENABLE_APPS=OFF",
+            "-DENABLE_EXAMPLES=OFF",
+            "-DENABLE_DOCS=OFF",
+            "-DENABLE_TESTS=OFF",
+            "-DENABLE_TESTDATA=OFF",
+            "-DENABLE_TOOLS=OFF",
+        ],
+    )
+
+
+def build_webp(source, source_dir, build_dir, prefix, env, config):
+    run(
+        [
+            "./configure",
+            f"--prefix={prefix}",
+            "--disable-shared",
+            "--enable-static",
+            "--disable-gl",
+            "--disable-sdl",
+            "--disable-png",
+            "--disable-jpeg",
+            "--disable-tiff",
+            "--disable-gif",
+        ],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+def build_ogg(source, source_dir, build_dir, prefix, env, config):
+    run(
+        ["./configure", f"--prefix={prefix}", "--disable-shared", "--enable-static"],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+def build_vorbis(source, source_dir, build_dir, prefix, env, config):
+    run(
+        ["./configure", f"--prefix={prefix}", "--disable-shared", "--enable-static"],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
+def build_theora(source, source_dir, build_dir, prefix, env, config):
+    run(
+        [
+            "./configure",
+            f"--prefix={prefix}",
+            "--disable-shared",
+            "--enable-static",
+            "--disable-asm",
+            "--disable-doc",
+            "--disable-examples",
+        ],
+        cwd=source_dir,
+        env=env,
+    )
+    run(["make", f"-j{jobs()}"], cwd=source_dir, env=env)
+    run(["make", "install"], cwd=source_dir, env=env)
+
+
 DEPENDENCY_BUILDERS = {
     "libdrm": build_libdrm,
     "libva": build_libva,
@@ -721,6 +803,11 @@ DEPENDENCY_BUILDERS = {
     "vpx": build_vpx,
     "lame": build_lame,
     "opus": build_opus,
+    "aom": build_aom,
+    "webp": build_webp,
+    "ogg": build_ogg,
+    "vorbis": build_vorbis,
+    "theora": build_theora,
 }
 
 

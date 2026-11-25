@@ -10,7 +10,7 @@ RUN apk add --no-cache \
 WORKDIR /work
 
 FROM alpine-${TARGETARCH} AS fixtures
-RUN apk add --no-cache bash ffmpeg file python3
+RUN apk add --no-cache bash file python3
 WORKDIR /work
 
 FROM alpine-${TARGETARCH} AS runtime

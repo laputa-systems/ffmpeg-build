@@ -21,7 +21,7 @@ scripts/linux-build.sh aarch64-unknown-linux-musl tools
 
 For `tools`, the script runs `build` and `audit`, generates fixtures in the `fixtures` image if they are missing, then copies the stage out of the build tree. It runs `tests/tools-workflows.sh` in the `runtime` image, a clean Alpine with only `bash`, `file`, and `python3`. That container mounts the copied prefix read-only and has no `/work`, so the pair cannot reach the build prefix.
 
-`tests/fixtures/gen.sh` needs a full host FFmpeg 9.0.2: Homebrew on macOS, or the Alpine `ffmpeg` package in the `fixtures` stage of `docker/Dockerfile`. That FFmpeg is only a test dependency. The `tools` profile is not expanded to generate fixtures.
+`tests/fixtures/gen.sh` needs a full FFmpeg 9.0.2: a host FFmpeg, or the `fixtures` profile build that `scripts/linux-fixtures.sh` produces in the pinned container. That FFmpeg is only a test dependency. The `tools` profile is not expanded to generate fixtures.
 
 The stage holds only `bin/ffmpeg`, `bin/ffprobe`, and `share/ffmpeg-build/manifest.json`. zlib and dav1d build into `.work/build/<target>/tools/deps` and link statically. The binaries are stripped, and on macOS ad-hoc signed.
 

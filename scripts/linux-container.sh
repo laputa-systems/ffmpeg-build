@@ -41,6 +41,16 @@ in_container() {
 }
 
 ensure_fixtures() {
-    [ -s "$ROOT/.work/fixtures/movie-movtext.mp4" ] ||
-        in_container "$1" fixtures tests/fixtures/gen.sh .work/fixtures
+    [ -s "$ROOT/.work/fixtures/movie-movtext.mp4" ] && return 0
+    local platform=$1 target bindir
+    case "$platform" in
+        linux/amd64) target=x86_64-unknown-linux-musl ;;
+        linux/arm64) target=aarch64-unknown-linux-musl ;;
+        *) printf 'error: unsupported platform %s\n' "$platform" >&2; return 2 ;;
+    esac
+    "$ROOT/scripts/linux-build.sh" "$target" fixtures
+    bindir="/work/.work/stage/$target/fixtures/bin"
+    in_container "$platform" fixtures sh -c \
+        'FIXTURE_FFMPEG="$1/ffmpeg" PATH="$1:$PATH" exec tests/fixtures/gen.sh .work/fixtures' \
+        sh "$bindir"
 }
