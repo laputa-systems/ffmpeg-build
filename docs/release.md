@@ -20,7 +20,7 @@ Releases are pre-releases. Consumers enumerate `https://github.com/laputa-system
 | Job | Runner | Does |
 | --- | --- | --- |
 | `preflight` | `ubuntu-26.04-arm` | rejects any ref other than the default branch, reads the FFmpeg version from `sources.lock.json`, runs `python3 -m unittest discover -s tests` |
-| `fixtures` | `ubuntu-26.04` | `scripts/linux-fixtures.sh`: test fixtures from Alpine FFmpeg 9.0.2 |
+| `fixtures` | `ubuntu-26.04` | `scripts/linux-fixtures.sh`: builds the `fixtures` profile in the pinned image and generates test fixtures with it |
 | `build` | `xcode-27` (Xcode 27.1), `ubuntu-26.04`, `ubuntu-26.04-arm` | `make build TARGET=<triple>`: `build`, `audit`, and `package` for every profile (Linux in the digest-pinned Alpine image, plus `fixtures` on x86-64); on macOS also `tests/tools-workflows.sh` on the tools and runtime stages |
 | `assemble` | `ubuntu-26.04-arm` | `.github/scripts/assemble_release.py`: exactly ten archives and ten manifests, each manifest checked against the commit and the SHA-256 of `sources.lock.json`, and a sorted `SHA256SUMS` |
 | `verify` | `xcode-27`, `ubuntu-26.04`, `ubuntu-26.04-arm` | `sha256sum -c` (`shasum -a 256 -c` on macOS), then `make verify TARGET=<triple>` on the assembled bytes |
