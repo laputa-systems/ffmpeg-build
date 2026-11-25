@@ -86,12 +86,12 @@
     },
     {
       "name": "laputa-buildlib",
-      "version": "0.2.0",
-      "url": "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.2.0-py3-none-any.whl",
-      "sha256": "aaee620f0478544b1d32075b44de48e69bbcbd8b974d5f599d037494d59f4b4a",
-      "size": 25193,
+      "version": "0.3.0",
+      "url": "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.0-py3-none-any.whl",
+      "sha256": "86bc1f8ce6be7c345f3cc5ac7046a4c84694319284a52b3479bb2e29a37dc849",
+      "size": 33330,
       "role": "tool",
-      "filename": "laputa_buildlib-0.2.0-py3-none-any.whl"
+      "filename": "laputa_buildlib-0.3.0-py3-none-any.whl"
     }
   ]
 }
