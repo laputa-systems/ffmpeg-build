@@ -1,5 +1,5 @@
 Prefix: FFB
-Next: 8
+Next: 9
 
 ### FFB-6 · P2 · tools lacks the filters, null muxer and libx265 that toolbox's movie and music commands run
 
@@ -62,4 +62,13 @@ Next: 8
 - **Problem:** The historical size figures describe Player, not current producer archives; qualification checks program version but does not measure shipped binary startup. Changes to size or startup have no producer baseline or regression check.
 - **Recommendation:** Measure profile archive and installed sizes and target-specific ffmpeg and ffprobe startup against comparable artifacts; record the inputs and distinguish cold and warm startup.
 - **Fix with:** bench-pyramid
+- **Effort:** M
+
+### FFB-8 · P3 · Mutation-qualify the bundled libva and libdrm build steps
+
+- **Area:** tests · mutation
+- **Where:** build.py build_libdrm, build_libva, RUNTIME_VA_LIBRARIES; .github/scripts/select_mutation_scopes.py SCOPES
+- **Problem:** FFB-7 (laputa-systems/ffmpeg-build#88) added module-level build functions and a constant, which the whole-change mutation trial refuses by design (`module-level build.py changes need mutation qualification`), so the new libva/libdrm build and bundling code merged with functional verification only (full x86_64 runtime build, 163 audit checks, 55 Alpine workflow checks, qualification, 150 unit tests, Ubuntu and Alpine runtime checks) and no mutation run.
+- **Recommendation:** Add build_libdrm and build_libva to a mutation scope (with the receipts the selector expects), qualify RUNTIME_VA_LIBRARIES through the runtime audit scope, and run the scopes on both Linux architectures.
+- **Fix with:** none
 - **Effort:** M
